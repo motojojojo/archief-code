@@ -81,6 +81,11 @@ for titel, datum, aan, kant in [('Idee hangende klei', '2026-09-25', 'Klei met t
 # logboek
 for d, t in [('2026-09-09', 'Klei gebakken en laten afkoelen.'), ('2026-10-01', 'Roestproef buiten gezet.')]:
     schrijf(f'Logboek/{d}.md', f'---\ntype: logboek\ndatum: {d}\n---\n{t}\n')
+# logboek met werktijden (in- en uitklokken); "13:10-" zonder eindtijd = de klok loopt nog (hier: vergeten uit te klokken)
+for d, tijden, t in [('2026-11-03', ['09:15-12:30', '13:15-17:00'], 'Mal gegoten en laten drogen.'), ('2026-11-04', ['10:00-15:45'], ''),
+                     ('2026-11-06', ['13:10-'], 'Schetsen voor de nieuwe serie.'), ('2026-11-09', ['09:00-12:15'], '')]:
+    wt = ''.join(f'  - "{x}"\n' for x in tijden)
+    schrijf(f'Logboek/{d}.md', f'---\ntype: logboek\ndatum: {d}\nwerktijden:\n{wt}---\n' + (t + '\n' if t else ''))
 
 # beeldbank: losse plaatjes, een box, tags, een tekening en een briefje
 beelden = {}
