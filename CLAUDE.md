@@ -26,7 +26,7 @@ Code voor Milo's kunstarchief (een Obsidian-kluis). Milo spreekt Nederlands: ant
 - Dus: pas als de wijziging op `main` staat, kan Milo op zijn telefoon op ↻ tikken.
 
 ## Werken vanuit een cloudsessie (telefoon)
-- Werk op een eigen branch en maak een pull request; Milo zegt wanneer het naar `main` mag (merge alleen als hij dat vraagt).
+- Werk op een eigen branch en maak een pull request. Merge hem daarna zelf naar `main`, zonder het eerst te vragen (Milo heeft daar vast toestemming voor gegeven, 9 nov 2026), maar alleen als alles op de testpagina's werkt. Vertel Milo daarna kort wat er veranderd is en wat hij moet doen (bijv. op ↻ tikken).
 - Na het mergen: Visualisator is binnen een paar minuten bijgewerkt op GitHub Pages; plugin via ↻ op de telefoon.
 
 ## Werken op Milo's pc
