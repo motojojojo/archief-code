@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.29.0';
+const BUILD = '0.30.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -2431,7 +2431,7 @@ class ArchiefView extends ItemView {
   openBoardAnim(from, S, done) {
     const r = from.getBoundingClientRect();
     if (!r.width || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) return this.openBoard(S, done);
-    const T1 = 380, T2 = 300, dpr = window.devicePixelRatio || 1;
+    const T1 = 560, T2 = 460, dpr = window.devicePixelRatio || 1;
     const pc = from.querySelector('canvas.am-preview-img'), pr = pc && pc.geo && pc.width > 1 ? pc.getBoundingClientRect() : null;
     const px = n => n + 'px', put = (el, q) => Object.assign(el.style, { left: px(q.l), top: px(q.t), width: px(q.w), height: px(q.h) });
     // waar de tekening (met een randje eromheen) nu in het kleine vlak staat
@@ -2448,11 +2448,15 @@ class ArchiefView extends ItemView {
     } catch (e) { console.warn(e); pic = null; }
     this.openBoard(S, done);
     const root = document.body.lastElementChild; if (!root || !root.classList.contains('am-full')) return;
-    root.classList.add('am-enter', 'am-enter-start');
+    // het menu bovenin (balk + kleuren + de strook boven de balk) schuift als één geheel binnen: even ver als het samen hoog is
+    root.classList.add('am-enter');
+    const ex = root.querySelector('.am-full-extra'), top = (ex && ex.offsetHeight ? ex : root.querySelector('.am-full-bar')).getBoundingClientRect().bottom - root.getBoundingClientRect().top;
+    root.style.setProperty('--am-top', Math.ceil(top + 12) + 'px');
+    root.classList.add('am-enter-start');
     root.append(h('div', { class: 'am-enter-strip am-enter-top' }), h('div', { class: 'am-enter-strip am-enter-bot' }));
     const fx = h('div', { class: 'am-grow' }); put(fx, { l: r.left, t: r.top, w: r.width, h: r.height });
     document.body.append(fx); if (pic) document.body.append(pic);
-    const finish = () => { root.classList.remove('am-enter'); root.querySelectorAll('.am-enter-strip').forEach(x => x.remove()); requestAnimationFrame(() => { fx.remove(); pic && pic.remove(); }); };
+    const finish = () => { root.classList.remove('am-enter'); root.style.removeProperty('--am-top'); root.querySelectorAll('.am-enter-strip').forEach(x => x.remove()); requestAnimationFrame(() => { fx.remove(); pic && pic.remove(); }); };
     // twee beeldjes later staat het bord klaar (maat en 'alles in beeld' bepaald): dan weten we waar de tekening heen moet
     requestAnimationFrame(() => requestAnimationFrame(async () => {
       fx.classList.add('am-grow-on'); put(fx, { l: 0, t: 0, w: window.innerWidth, h: window.innerHeight });
