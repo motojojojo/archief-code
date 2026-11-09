@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.17.0';
+const BUILD = '0.18.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -1458,7 +1458,7 @@ class ArchiefView extends ItemView {
       h('button', { class: !inl ? 'am-on' : '', title: 'Nog eens tikken: de stroom', onclick: () => this.tab === 'archief' && !this.editing ? this.openStroom() : this.show('archief') }, 'Archief'),
       h('button', { class: 'am-upd', title: 'Bijwerken naar de nieuwste versie', onclick: () => this.plugin.update() }, '↻ ', h('small', {}, BUILD))));
     if (inl && !this.editing && !(this.tab === 'aanvullen' && this.form.vullen)) root.append(h('div', { class: 'am-subtabs' },
-      ...[['idee', 'Idee'], ['aanvullen', 'Foto'], ['logboek', 'Logboek']].map(([k, l]) => h('button', { class: this.tab === k ? 'am-on' : '', onclick: () => this.tab !== k && this.show(k) }, l))));
+      ...[['aanvullen', 'Foto'], ['idee', 'Idee'], ['logboek', 'Logboek']].map(([k, l]) => h('button', { class: this.tab === k ? 'am-on' : '', onclick: () => this.tab !== k && this.show(k) }, l))));
     const body = h('div', { class: 'am-body' }); root.append(body);
     const again = () => { const y = this.contentEl.scrollTop; this.render().then(() => { this.contentEl.scrollTop = y; }); };
     if (this.tab === 'idee') this.renderIdea(body, again);
@@ -1846,14 +1846,14 @@ class ArchiefView extends ItemView {
           if (m) S.objs[S.objs.indexOf(m)] = n;
           else { const at = Math.max(...src.map(o => S.objs.indexOf(o))); S.objs.splice(at + 1, 0, n); for (const o of src) o.hide = true; }
           m = n; C.draw();
-          M.set(h('p', { class: 'am-hint' }, 'Bevalt deze niet? Elke keer komt er een andere uit.'),
+          M.set(
             h('button', { class: 'am-menu-btn', onclick: run }, '↻  Andere variant'),
             h('button', { class: 'am-menu-btn', onclick: () => { S.objs = S.objs.filter(x => x !== m); for (const o of src) delete o.hide; sel.clear(); C.draw(); draw(); } }, 'Toch niet'),
             h('button', { class: 'am-menu-btn am-primary', onclick: () => { S.objs = S.objs.filter(x => !src.includes(x)); sel.clear(); C.draw(); draw(); } }, 'Houden'));
         };
         await run();
       };
-      M.set(h('p', { class: 'am-hint' }, 'Bovenste laag staat bovenaan; sleep aan ≡ om te schikken. Tik op een plaatje voor het fotomenu; kies er meer om ze samen te voegen of te groeperen.'),
+      M.set(
         h('div', { class: 'am-layers' }, rows),
         h('div', { class: 'am-grid-acts' },
           h('button', { class: 'am-grid-btn', disabled: chosen.length < 2, onclick: async () => {
@@ -2342,8 +2342,7 @@ class ArchiefView extends ItemView {
     ta.value = F.tekst; ta.addEventListener('input', () => { F.tekst = ta.value; });
     body.append(h('div', { class: 'am-field' }, h('label', {}, 'Beschrijving'), ta));
 
-    if (los) body.append(h('p', { class: 'am-hint' }, 'Elk item krijgt de datum van zijn eigen foto (staat onder de miniatuur). Zonder datum wordt het vandaag.'));
-    else {
+    if (!los) {
       const d = h('input', { type: 'date', value: F.datum });
       d.addEventListener('change', () => { F.datum = d.value; F.datumBron = 'zelf'; });
       const hint = { foto: 'uit de foto', naam: 'uit de bestandsnaam', bestand: 'datum van het bestand', vandaag: F.files.length ? 'geen datum in de foto gevonden, staat op vandaag' : 'vandaag', zelf: '' }[F.datumBron];
@@ -2367,7 +2366,6 @@ class ArchiefView extends ItemView {
     if (S.objs.length) boardCanvas(S.objs, 700).then(c => { c.className = 'am-preview-img'; prev.prepend(c); });
     body.append(prev);
     body.append(this.lijnBlock(S.lijnen, again, { holder: S, get: () => S.datum || isoDay(Date.now()), set: d => { S.datum = d; }, skip: null }));
-    body.append(h('p', { class: 'am-hint' }, 'Klaar zet het idee met een afbeelding van het bord in Te Doen. In de visualisator kun je het bord daarna verder bewerken in de Ideeënfabriek.'));
     const save = h('button', { class: 'am-save', disabled: S.busy }, S.busy ? 'Bewaren…' : 'Klaar → opslaan');
     save.addEventListener('click', async () => {
       if (!S.objs.length) return new Notice('Het bord is nog leeg.');
@@ -2708,8 +2706,7 @@ class ArchiefView extends ItemView {
       n.hide(); new Notice(`${picked.length} foto${picked.length === 1 ? '' : "'s"} staan klaar om aan te vullen`); P.sync(); again();
     });
     body.append(h('label', { class: 'am-pick' }, input, '+ Foto\'s inladen'));
-    if (!files.length) body.append(h('p', { class: 'am-hint' }, 'Laad hier gerust veel foto\'s tegelijk in. Ze blijven hier staan (ook na afsluiten) tot je ze kiest en naar de Beeldbank stuurt of als item aanvult.'));
-    else {
+    if (files.length) {
       // tikken verandert alleen het vakje, de kop en de knoppen; het scherm blijft staan
       const chosen = () => files.filter(f => sel.has(f.path));
       const headTxt = h('span'), allBtn = h('button', { class: 'am-filter-x' });
@@ -2746,8 +2743,7 @@ class ArchiefView extends ItemView {
           h('span', { class: 'am-dump-ok' }, '✓'));
         ths.set(f.path, b); grid.append(b); mark(f);
       }
-      body.append(grid, h('p', { class: 'am-hint' }, 'Kies foto\'s en tik op Beeldbank (research en inspiratie, zonder project of tags) of op Als item (dan vul je datum, project en tags in).'),
-        h('div', { class: 'am-bar am-dump-bar' }, bank, go, del)); upd();
+      body.append(grid, h('div', { class: 'am-bar am-dump-bar' }, bank, go, del)); upd();
     }
     // items in je archief waar nog tags of een project aan ontbreken
     const open = this.data.teDoen;
@@ -2765,8 +2761,7 @@ class ArchiefView extends ItemView {
       } });
       const updDel = () => { delBtn.disabled = !td.size; delBtn.textContent = td.size ? `🗑 Weghalen (${td.size})` : 'Kies wat weg mag'; };
       body.append(h('div', { class: 'am-sub-head' }, h('h4', { class: 'am-sub' }, `Nog aan te vullen in je archief (${open.length})`),
-        h('button', { class: 'am-filter-x', onclick: () => { this.tdMode = !mode; if (mode) td.clear(); again(); } }, mode ? 'Klaar' : 'Kiezen')),
-        h('p', { class: 'am-hint' }, mode ? 'Tik op wat weg mag, dan op Weghalen.' : 'Hetzelfde als Te doen in de visualisator. Tik om aan te vullen, of op Kiezen om weg te halen.'));
+        h('button', { class: 'am-filter-x', onclick: () => { this.tdMode = !mode; if (mode) td.clear(); again(); } }, mode ? 'Klaar' : 'Kiezen')));
       const grid = h('div', { class: 'am-grid' });
       for (const it of open.slice(0, this.shown)) {
         const c = this.card(it, mode ? el => { td.has(it.file.path) ? td.delete(it.file.path) : td.add(it.file.path); mk(el); updDel(); } : null);
