@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.21.0';
+const BUILD = '0.22.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -1984,14 +1984,16 @@ class ArchiefView extends ItemView {
     const rootOf = r => { for (let k = 0; r.side && k < 50; k++) r = r.from.row; return r; };
     const gapX = (r, i) => { const a = ns(r)[i - 1], b = ns(r)[i]; return a && b ? (a.x + b.x) / 2 : a ? a.x + SCOL * .6 : b.x - SCOL * .6; };
     // boven of onder een item (met een idee), of boven/onder een idee: dezelfde vakjes als in de visualisator
+    // met een vinger is dat lastig mikken: de vakjes zijn wat ruimer dan in de visualisator en het dichtstbijzijnde item wint
     const attAt = (mx, my) => {
-      const X = mx * S_FX, Y = my * S_FY;
+      const X = mx * S_FX, Y = my * S_FY; let best = null, bd = 1e9;
       for (const n of SP.all) {
-        if (!(isIdee || n.it.idee) || Math.abs(X - n.X) >= S_CARD * .6) continue;
-        const kant = Y < n.Y - S_CH - 4 && Y > n.Y - S_ROW / 2 - 8 ? 'boven' : Y > n.Y + S_CH + 4 && Y < n.Y + S_ROW / 2 + 8 ? 'onder' : null;
-        if (kant) return attT(n, kant);
+        if (!(isIdee || n.it.idee) || Math.abs(X - n.X) >= S_COL * .5) continue;
+        const kant = Y < n.Y - S_CH + 6 && Y > n.Y - S_ROW / 2 - 14 ? 'boven' : Y > n.Y + S_CH - 6 && Y < n.Y + S_ROW / 2 + 14 ? 'onder' : null;
+        const d = Math.hypot(X - n.X, Math.abs(Y - n.Y) - S_ROW / 3);
+        if (kant && d < bd) { bd = d; best = attT(n, kant); }
       }
-      return null;
+      return best;
     };
     const attT = (n, kant) => ({ r: n.row, side: true, att: true, anchor: n, kant, a: null, b: null, gx: n.x, gy: n.y + (kant === 'boven' ? -1 : 1) * SROW / 2 });
     const target = (mx, my) => {
@@ -2189,7 +2191,7 @@ class ArchiefView extends ItemView {
       const n = SP.hit(v, px, py); if (!n) return null;
       unpick();
       const from = n.row.side ? '' : n.row.lijn, low = s => String(s).toLowerCase();
-      const E = { datum: n.it.datum, lijnen: [...n.it.lijnen] };
+      const E = { it: { idee: n.it.idee }, datum: n.it.datum, lijnen: [...n.it.lijnen] };
       const C = { holder: E, get: () => E.datum, set: d => { E.datum = d; }, skip: n.it.path };
       return this.pickPlek(C, E.lijnen, async () => {
         if (!E.plek) return;
