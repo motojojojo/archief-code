@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.22.0';
+const BUILD = '0.23.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -1064,6 +1064,8 @@ module.exports = class ArchiefMobiel extends Plugin {
   // lijnen, nieuwste eerst; tags gegroepeerd zoals in .archief/taggroepen.json
   async choices() {
     const items = this.items(), lijn = new Map(), tag = new Map();
+    // wat nog in Te doen hoort (zelfde regel als de visualisator); dat staat niet in de stroom
+    try { this.todo = new Set((await this.teDoen(items)).map(it => it.file.path)); } catch (e) { this.todo = null; }
     for (const it of items) {
       for (const l of it.lijnen) lijn.set(l, (lijn.get(l) || '') > it.datum ? lijn.get(l) : it.datum);
       for (const t of it.tags) tag.set(t, (tag.get(t) || 0) + 1);
@@ -1378,7 +1380,8 @@ module.exports = class ArchiefMobiel extends Plugin {
       const type = String(fm.type ?? '').toLowerCase().trim();
       if (type === 'project' || type === 'lijn') { pages.set(f.basename.toLowerCase(), { komtUit: last(arr(fm.komt_uit ?? fm['komt uit'])[0]), kleur: String(fm.kleur ?? fm.color ?? '').trim() }); continue; }
       // mijlpalen, producten en wat nog in Te Doen staat horen niet in de Stroom
-      if (type === 'mijlpaal' || type === 'product' || /^(ja|true|yes)$/i.test(String(fm.inbox ?? '').trim())) continue;
+      // zoals de visualisator: alleen als er ook nog iets ontbreekt (een compleet item met inbox: ja staat er gewoon in)
+      if (type === 'mijlpaal' || type === 'product' || (this.todo ? this.todo.has(f.path) : /^(ja|true|yes)$/i.test(String(fm.inbox ?? '').trim()))) continue;
       const lijnen = arr(fm.project ?? fm.projecten ?? fm.lijn ?? fm.lijnen).map(linkTitle).filter(Boolean), aan = last(arr(fm.aan)[0]);
       if (!lijnen.length && !aan) continue;
       let datum = String(fm.datum ?? fm.date ?? '').slice(0, 10); if (!/^\d{4}-\d\d-\d\d$/.test(datum)) datum = isoDay(f.stat.mtime);
