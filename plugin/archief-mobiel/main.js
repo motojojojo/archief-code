@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.16.0';
+const BUILD = '0.17.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -332,6 +332,41 @@ async function boardImgData(file) {
 
 const plekOk = (p, datum, lijnen) => !!p && p.datum === datum && lijnen.some(l => l.toLowerCase() === p.lijn.toLowerCase());
 const short = (t, n = 22) => t.length > n ? t.slice(0, n - 1) + '…' : t;
+/* ---------- in- en uitklokken: precies zoals in de visualisator ---------- */
+// de werktijden staan in de frontmatter van de dagnotitie (Logboek/JJJJ-MM-DD.md):
+//   werktijden:
+//     - "09:05-12:30"
+//     - "13:10-"        <- zonder eindtijd: de klok loopt nog (ook als de app dicht is)
+const LOG_FM = /^---\r?\n[\s\S]*?\r?\n---[^\n]*\n?/;
+const hhmm = t => { const x = new Date(t); return String(x.getHours()).padStart(2, '0') + ':' + String(x.getMinutes()).padStart(2, '0'); };
+const wtMin = s => +s.slice(0, 2) * 60 + +s.slice(3, 5);
+const fmtDur = m => { m = Math.max(0, Math.round(m)); return m < 60 ? m + 'm' : Math.floor(m / 60) + 'u' + (m % 60 ? ' ' + String(m % 60).padStart(2, '0') + 'm' : ''); };
+function parseWerk(raw) {
+  const fm = (String(raw || '').match(/^---\r?\n([\s\S]*?)\r?\n---/) || [])[1]; if (!fm) return [];
+  const lines = fm.split(/\r?\n/), i = lines.findIndex(l => /^werktijden\s*:/.test(l)); if (i < 0) return [];
+  const vals = [lines[i].replace(/^werktijden\s*:/, '')];
+  for (let j = i + 1; j < lines.length && /^[\s-]/.test(lines[j]); j++) vals.push(lines[j]);
+  const out = [];
+  for (const v of vals.join('\n').split(/[\n,]/)) {
+    const m = v.match(/(\d{1,2}):(\d\d)\s*-\s*(?:(\d{1,2}):(\d\d))?/);
+    if (m) out.push({ van: m[1].padStart(2, '0') + ':' + m[2], tot: m[3] ? m[3].padStart(2, '0') + ':' + m[4] : '' });
+  }
+  return out;
+}
+// de notitie met andere werktijden; de rest van de frontmatter en de tekst blijven zoals ze waren
+function withWerk(raw, d, list) {
+  const m = raw && raw.match(LOG_FM), keep = [];
+  if (m) { let skip = false; for (const l of m[0].replace(/^---\r?\n/, '').replace(/\r?\n---[^\n]*\n?$/, '').split(/\r?\n/)) { if (/^werktijden\s*:/.test(l)) { skip = true; continue; } if (skip && l.trim() && /^[\s-]/.test(l)) continue; skip = false; keep.push(l); } }
+  else keep.push('type: logboek', 'datum: ' + d);
+  const block = list.length ? ['werktijden:', ...list.map(w => `  - "${w.van}-${w.tot}"`)] : [];
+  return `---\n${[...keep, ...block].join('\n')}\n---\n` + (m ? raw.slice(m[0].length) : (raw || ''));
+}
+// de notitie met een andere tekst; de frontmatter (met de werktijden) blijft staan
+const withText = (raw, d, t) => { const m = raw && raw.match(LOG_FM); return (m ? m[0].replace(/\n?$/, '\n') : `---\ntype: logboek\ndatum: ${d}\n---\n`) + (t ? t + '\n' : ''); };
+// minuten gewerkt op dag d; een tijd zonder eindtijd telt tot nu, een eindtijd vóór de begintijd is na middernacht
+const werkMin = (d, list) => (list || []).reduce((n, w) => n + (w.tot ? (wtMin(w.tot) - wtMin(w.van) + 1440) % 1440 : Math.max(0, (Date.now() - new Date(d + 'T' + w.van)) / 6e4)), 0);
+const sortWerk = l => l.filter(w => /^\d\d:\d\d$/.test(w.van)).sort((a, b) => a.van.localeCompare(b.van));
+const addDay = (d, n) => { const x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n); return isoDay(x); };
 /* ---------- mini-stroom: zelfde regels als de Stroom van de visualisator, maar simpel getekend ---------- */
 // per project een rij, alles op datum (en op dezelfde dag de volgorde); een project dat uit een item voortkomt
 // (komt_uit op de projectpagina) staat onder het project van dat item, met een tak vanaf dat item.
@@ -904,7 +939,7 @@ module.exports = class ArchiefMobiel extends Plugin {
     const mark = () => { const l = this.app.workspace.activeLeaf; document.body.classList.toggle('am-actief', !!(l && l.view && l.view.getViewType && l.view.getViewType() === VIEW)); for (const x of this.app.workspace.getLeavesOfType(VIEW)) x.view && x.view.fitBottom && x.view.fitBottom(); };
     this.registerEvent(this.app.workspace.on('active-leaf-change', mark));
     this.app.workspace.onLayoutReady(mark);
-    let rt; const later = f => { if (f && f.path && !/^(Onderzoek|Ideeën|Aanvullen)\//.test(f.path)) return; clearTimeout(rt); rt = setTimeout(() => this.refreshViews(false), 1500); };
+    let rt; const later = f => { if (f && f.path && /^Logboek\//.test(f.path)) { clearTimeout(this.lbRt); this.lbRt = setTimeout(() => this.refreshViews(false, 'logboek'), 1500); return; } if (f && f.path && !/^(Onderzoek|Ideeën|Aanvullen)\//.test(f.path)) return; clearTimeout(rt); rt = setTimeout(() => this.refreshViews(false), 1500); };
     this.app.workspace.onLayoutReady(() => {
       this.registerEvent(this.app.metadataCache.on('changed', later));
       this.registerEvent(this.app.vault.on('delete', later)); this.registerEvent(this.app.vault.on('rename', later)); this.registerEvent(this.app.vault.on('create', later));
@@ -974,9 +1009,9 @@ module.exports = class ArchiefMobiel extends Plugin {
   }
   onunload() { document.body.classList.remove('am-actief'); }
   // het scherm opnieuw opbouwen met wat er nu in de kluis staat (niet tijdens bewerken, aanvullen of een idee)
-  refreshViews(force) {
+  refreshViews(force, only) {
     for (const l of this.app.workspace.getLeavesOfType(VIEW)) {
-      const v = l.view; if (!v || !v.render || v.editing || v.tab === 'idee' || v.lbDirty || (v.form && v.form.vullen) || v.closeSheet || v.closeFull || document.querySelector('.am-crop')) continue;
+      const v = l.view; if (!v || !v.render || (only && v.tab !== only) || v.editing || v.tab === 'idee' || v.lbDirty || (v.form && v.form.vullen) || v.closeSheet || v.closeFull || document.querySelector('.am-crop')) continue;
       const a = document.activeElement; if (!force && a && v.contentEl.contains(a) && /INPUT|SELECT|TEXTAREA/.test(a.tagName)) continue;
       const y = v.contentEl.scrollTop; v.render().then(() => { v.contentEl.scrollTop = y; });
     }
@@ -1220,12 +1255,31 @@ module.exports = class ArchiefMobiel extends Plugin {
     }
   }
   logFile(d) { return this.app.vault.getAbstractFileByPath(normalizePath(`${LOG_DIR}/${d}.md`)); }
-  async logRead(d) { const f = this.logFile(d); return f ? (await this.app.vault.read(f)).replace(/^---\r?\n[\s\S]*?\r?\n---[^\n]*\n?/, '').trim() : ''; }
+  async logRaw(d) { const f = this.logFile(d); return f ? await this.app.vault.read(f) : ''; }
+  async logRead(d) { return (await this.logRaw(d)).replace(LOG_FM, '').trim(); }
+  async logPut(d, body) { const f = this.logFile(d); if (f) await this.app.vault.modify(f, body); else { await this.ensureDir(LOG_DIR); await this.app.vault.create(normalizePath(`${LOG_DIR}/${d}.md`), body); } }
+  // de notitie van een dag; de werktijden blijven staan (een lege notitie zonder werktijden gaat naar .trash)
   async logWrite(d, text) {
-    const f = this.logFile(d), t = text.trim();
-    if (!t) { if (f) await this.app.vault.trash(f, false); return; }
-    const body = `---\ntype: logboek\ndatum: ${d}\n---\n${t}\n`;
-    if (f) await this.app.vault.modify(f, body); else { await this.ensureDir(LOG_DIR); await this.app.vault.create(normalizePath(`${LOG_DIR}/${d}.md`), body); }
+    const f = this.logFile(d), t = text.trim(), raw = f ? await this.app.vault.read(f) : '';
+    if (!t && !parseWerk(raw).length) { if (f) await this.app.vault.trash(f, false); return; }
+    await this.logPut(d, withText(raw, d, t));
+  }
+  async werk(d) { return parseWerk(await this.logRaw(d)); }
+  async werkSave(d, change) { const raw = await this.logRaw(d), list = sortWerk(change(parseWerk(raw))); await this.logPut(d, withWerk(raw, d, list)); return list; }
+  // loopt de klok? (de laatste dag met een tijd zonder eindtijd)
+  async klokLoopt() {
+    for (const d of this.logDays().slice(0, 60)) { const w = (await this.werk(d)).find(x => !x.tot); if (w) return { d, van: w.van }; }
+    return null;
+  }
+  // in- of uitklokken; geeft terug wat er gebeurde
+  async klok() {
+    const run = await this.klokLoopt(), now = Date.now(), today = isoDay(now);
+    if (!run) { await this.werkSave(today, l => [...l, { van: hhmm(now), tot: '' }]); return { msg: `Ingeklokt om ${hhmm(now)}` }; }
+    let tot = hhmm(now), lang = false;
+    // vergeten uit te klokken op een eerdere dag: dan stopt hij om 23:59 die dag (behalve als je net na middernacht doorwerkte)
+    if (run.d !== today && !(run.d === addDay(today, -1) && wtMin(tot) < wtMin(run.van) && now - new Date(run.d + 'T' + run.van) < 16 * 36e5)) { tot = '23:59'; lang = true; }
+    await this.werkSave(run.d, l => { const w = l.find(x => !x.tot && x.van === run.van); if (w) w.tot = tot; return l.filter(x => x !== w || x.tot !== x.van); });
+    return lang ? { msg: `De klok liep nog sinds ${fmtD(run.d)} ${run.van}. Hij is gestopt om 23:59 die dag; pas daar de eindtijd aan.`, dag: run.d } : { msg: `Uitgeklokt om ${tot}` };
   }
   logDays() { return this.app.vault.getMarkdownFiles().filter(f => f.path.startsWith(LOG_DIR + '/') && /^\d{4}-\d\d-\d\d$/.test(f.basename)).map(f => f.basename).sort().reverse(); }
   async ensureDir(dir) { if (!this.app.vault.getAbstractFileByPath(dir)) { try { await this.app.vault.createFolder(dir); } catch (e) {} } }
@@ -1363,7 +1417,7 @@ class ArchiefView extends ItemView {
   getDisplayText() { return 'Archief'; }
   getIcon() { return 'camera'; }
   async onOpen() { await this.render(); }
-  async onClose() { this.clearPreviews(); this.closeSheet && this.closeSheet(); document.querySelectorAll('.am-crop').forEach(x => x.remove()); if (this.closeFull) { const f = this.closeFull; this.closeFull = null; f(); } }
+  async onClose() { clearInterval(this.klokTimer); this.clearPreviews(); this.closeSheet && this.closeSheet(); document.querySelectorAll('.am-crop').forEach(x => x.remove()); if (this.closeFull) { const f = this.closeFull; this.closeFull = null; f(); } }
   async show(tab) { if (tab === 'taggen') tab = 'archief'; if (tab === 'nieuw') tab = 'idee'; if (tab) { if (tab !== this.tab) this.shown = PAGE; this.tab = tab; } this.editing = null; await this.render(); }
   resetForm() {
     this.clearPreviews && this.clearPreviews();
@@ -2729,6 +2783,7 @@ class ArchiefView extends ItemView {
   async renderLogboek(body, again) {
     const P = this.plugin, today = isoDay(Date.now()), d = this.lbDag || (this.lbDag = today);
     const old = await P.logRead(d);
+    await this.renderKlok(body, d, again);
     const date = h('input', { type: 'date', value: d, max: today });
     date.addEventListener('change', () => { if (!date.value) return; if (this.lbDirty && !confirm('Je notitie is nog niet bewaard. Toch naar een andere dag?')) { date.value = d; return; } this.lbDirty = false; this.lbDag = date.value; again(); });
     const ta = h('textarea', { class: 'am-log-ta', rows: 9, placeholder: 'Wat deed je vandaag, wat lukte, wat niet, wat wil je morgen proberen?' }); ta.value = old;
@@ -2736,12 +2791,13 @@ class ArchiefView extends ItemView {
     ta.addEventListener('input', () => { this.lbDirty = ta.value.trim() !== old; save.disabled = !this.lbDirty; save.textContent = 'Opslaan'; });
     save.addEventListener('click', async () => {
       save.disabled = true;
-      try { await P.logWrite(d, ta.value); this.lbDirty = false; new Notice(ta.value.trim() ? 'Logboek bewaard' : 'Lege notitie weggehaald (staat in .trash)'); P.sync(); setTimeout(again, 300); }
+      try { const leeg = !ta.value.trim() && !(await P.werk(d)).length; await P.logWrite(d, ta.value); this.lbDirty = false; new Notice(ta.value.trim() ? 'Logboek bewaard' : leeg ? 'Lege notitie weggehaald (staat in .trash)' : 'Notitie leeggemaakt (de werktijden blijven staan)'); P.sync(); setTimeout(again, 300); }
       catch (e) { console.error(e); new Notice('Bewaren lukte niet: ' + (e && e.message || e), 8000); save.disabled = false; }
     });
     const step = n => { const x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n); const nd = isoDay(x); if (nd > today) return; if (this.lbDirty && !confirm('Je notitie is nog niet bewaard. Toch naar een andere dag?')) return; this.lbDirty = false; this.lbDag = nd; again(); };
     body.append(h('div', { class: 'am-log-day' }, h('button', { class: 'am-log-step', 'aria-label': 'dag eerder', onclick: () => step(-1) }, '‹'), date, h('button', { class: 'am-log-step', 'aria-label': 'dag later', disabled: d >= today, onclick: () => step(1) }, '›')));
     body.append(h('div', { class: 'am-field' }, h('label', {}, d === today ? 'Vandaag' : fmtD(d)), ta));
+    await this.renderWerk(body, d, again);
     // wat je die dag aan het archief toevoegde
     const made = this.data.items.filter(it => it.datum === d);
     if (made.length) {
@@ -2752,12 +2808,68 @@ class ArchiefView extends ItemView {
     if (days.length) {
       body.append(h('h4', { class: 'am-sub' }, 'Eerdere dagen'));
       const list = h('div', { class: 'am-log-list' });
-      for (const x of days) list.append(h('button', { class: 'am-log-item', onclick: () => { if (this.lbDirty && !confirm('Je notitie is nog niet bewaard. Toch naar een andere dag?')) return; this.lbDirty = false; this.lbDag = x; again(); this.contentEl.scrollTop = 0; } }, h('b', {}, fmtD(x)), h('span', { class: 'am-log-prev' }, '…')));
+      for (const x of days) list.append(h('button', { class: 'am-log-item', onclick: () => { if (this.lbDirty && !confirm('Je notitie is nog niet bewaard. Toch naar een andere dag?')) return; this.lbDirty = false; this.lbDag = x; again(); this.contentEl.scrollTop = 0; } }, h('b', {}, fmtD(x), h('span', { class: 'am-log-uren' })), h('span', { class: 'am-log-prev' }, '…')));
       body.append(list);
-      // een stukje van elke notitie erbij
-      days.forEach(async (x, i) => { const t = await P.logRead(x); const el = list.children[i] && list.children[i].querySelector('.am-log-prev'); if (el) el.textContent = short(t.replace(/\s+/g, ' '), 70); });
+      // een stukje van elke notitie erbij, en hoe lang je die dag werkte
+      days.forEach(async (x, i) => {
+        const raw = await P.logRaw(x), c = list.children[i]; if (!c) return;
+        c.querySelector('.am-log-prev').textContent = short(raw.replace(LOG_FM, '').trim().replace(/\s+/g, ' '), 70);
+        const w = parseWerk(raw); if (w.length) c.querySelector('.am-log-uren').textContent = ` · ⏱ ${fmtDur(werkMin(x, w))}${w.some(y => !y.tot) ? ' (loopt)' : ''}`;
+      });
     }
     body.append(h('div', { class: 'am-bar' }, save));
+  }
+  // de klok bovenaan het logboek: één knop (inklokken / uitklokken), met vandaag en deze week eronder
+  async renderKlok(body, d, again) {
+    const P = this.plugin, today = isoDay(Date.now()), ma = addDay(today, -((new Date().getDay() + 6) % 7));
+    const run = await P.klokLoopt(), week = [];
+    for (let i = 0; i < 7; i++) { const x = addDay(ma, i); if (x > today) break; week.push([x, await P.werk(x)]); }
+    const btn = h('button', { class: 'am-klok' + (run ? ' am-klok-aan' : '') }), sub = h('div', { class: 'am-klok-sub' });
+    const upd = () => {
+      btn.textContent = run ? `⏹ Uitklokken · ${fmtDur(werkMin(run.d, [{ van: run.van, tot: '' }]))}` : '⏱ Inklokken';
+      const vd = week.find(([x]) => x === today), wm = week.reduce((n, [x, w]) => n + werkMin(x, w), 0);
+      sub.textContent = (run ? `Ingeklokt sinds ${run.d === today ? '' : fmtD(run.d) + ' '}${run.van} · ` : '') + `vandaag ${fmtDur(vd ? werkMin(today, vd[1]) : 0)} · deze week ${fmtDur(wm)}`;
+    };
+    upd();
+    clearInterval(this.klokTimer);
+    if (run) this.klokTimer = setInterval(() => { if (!btn.isConnected) return clearInterval(this.klokTimer); upd(); }, 20000);
+    btn.addEventListener('click', async () => {
+      if (this.lbDirty && !confirm('Je notitie is nog niet bewaard. Toch in- of uitklokken? (de notitie blijft in het vak staan)')) return;
+      btn.disabled = true;
+      try {
+        const r = await P.klok(); new Notice(r.msg, r.dag ? 10000 : 4000);
+        if (r.dag) { this.lbDirty = false; this.lbDag = r.dag; }
+        P.sync(); setTimeout(again, 300);
+      } catch (e) { console.error(e); new Notice('In- of uitklokken lukte niet: ' + (e && e.message || e), 8000); btn.disabled = false; }
+    });
+    body.append(h('div', { class: 'am-klok-box' }, btn, sub));
+  }
+  // de werktijden van de gekozen dag: aanpassen (bijvoorbeeld als je vergat uit te klokken), weghalen of erbij zetten
+  async renderWerk(body, d, again) {
+    const P = this.plugin, list = await P.werk(d), box = h('div', { class: 'am-werk' });
+    const save = async rows => {
+      if (rows.filter(w => !w.tot).length > 1) return new Notice('Maar één tijd mag zonder eindtijd zijn (de klok die nog loopt).', 6000);
+      try { await P.werkSave(d, () => rows); new Notice('Werktijden bewaard'); P.sync(); setTimeout(again, 300); }
+      catch (e) { console.error(e); new Notice('Bewaren lukte niet: ' + (e && e.message || e), 8000); }
+    };
+    const row = (w, i) => {
+      const van = h('input', { type: 'time', value: w.van, 'aria-label': 'begin' }), tot = h('input', { type: 'time', value: w.tot, 'aria-label': 'eind' });
+      const nieuw = i == null;
+      // een bestaande tijd wordt meteen bewaard; een nieuwe pas als begin en eind er allebei staan
+      const changed = () => {
+        if (!van.value) return;
+        if (nieuw) { if (tot.value) save([...list, { van: van.value, tot: tot.value }]); return; }
+        if (!tot.value && list[i].tot) { tot.value = list[i].tot; return; } // een eindtijd leeg maken zou de klok weer laten lopen
+        save(list.map((x, j) => j === i ? { van: van.value, tot: tot.value } : x));
+      };
+      van.addEventListener('change', changed); tot.addEventListener('change', changed);
+      return h('div', { class: 'am-werk-row' }, van, h('span', {}, '–'), tot, !w.tot && !nieuw ? h('span', { class: 'am-werk-loopt' }, 'loopt') : null,
+        h('button', { class: 'am-werk-del', 'aria-label': 'weghalen', onclick: () => nieuw ? again() : confirm(`${w.van}–${w.tot || '…'} weghalen?`) && save(list.filter((x, j) => j !== i)) }, '×'));
+    };
+    list.forEach((w, i) => box.append(row(w, i)));
+    const add = h('button', { class: 'am-werk-add', onclick: () => { add.before(row({ van: '', tot: '' })); add.remove(); } }, '+ Werktijd toevoegen');
+    box.append(add);
+    body.append(h('div', { class: 'am-field' }, h('label', {}, `Gewerkt${list.length ? ' · ' + fmtDur(werkMin(d, list)) : ''}`), box));
   }
   // gekozen foto's aanvullen; na opslaan gaan ze uit Inladen weg (naar .trash)
   async dumpToNew(chosen) {
