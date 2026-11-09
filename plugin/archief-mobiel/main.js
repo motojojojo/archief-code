@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.24.0';
+const BUILD = '0.25.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -948,17 +948,9 @@ module.exports = class ArchiefMobiel extends Plugin {
   // eerst kijken of GitHub een nieuwere versie heeft; anders (of zonder internet) synchroniseren zoals vroeger
   async update() {
     if (this.updating) return; this.updating = true;
-    const note = new Notice(`Bijwerken… (nu versie ${BUILD})`, 0);
-    try {
-      let v = null;
-      try { v = await this.fromGitHub(); } catch (e) { console.warn('archief-mobiel: bijwerken via GitHub lukte niet', e); }
-      if (v) {
-        note.hide(); new Notice(`Nieuwe versie ${v} binnen. Obsidian herlaadt…`, 3000);
-        await new Promise(r => setTimeout(r, 1200));
-        this.app.commands.executeCommandById('app:reload'); return;
-      }
-      await this.syncUpdate(note);
-    } finally { this.updating = false; }
+    const note = new Notice(`Synchroniseren… (nu versie ${BUILD})`, 0);
+    // in één tik: eerst synchroniseren (je wijzigingen van de pc), daarna kijken of GitHub een nieuwere versie heeft
+    try { await this.syncUpdate(note); } finally { this.updating = false; }
   }
   // de code van GitHub halen en over de plugin heen zetten; geeft de nieuwe versie terug, of null als er niets nieuwers is
   async fromGitHub() {
@@ -985,8 +977,8 @@ module.exports = class ArchiefMobiel extends Plugin {
     const codeOnDisk = async () => { try { const m = (await this.app.vault.adapter.read(`${this.manifest.dir}/main.js`)).match(/const BUILD = '([\d.]+)'/); return m ? m[1] : null; } catch (e) { return null; } };
     const rs = this.app.plugins && this.app.plugins.plugins && this.app.plugins.plugins['remotely-save'];
     const knows = !!(rs && 'syncStatus' in rs), busy = () => knows && !/^(idle|finish)$/.test(String(rs.syncStatus));
-    {
-      if (!this.sync()) { note.hide(); new Notice('Remotely Save staat niet aan; kan niet synchroniseren.', 6000); return; }
+    const synced = this.sync();
+    if (synced) {
       // wachten tot de sync helemaal klaar is (Remotely Save houdt syncStatus bij), hoogstens 2 minuten.
       // Niet eerder stoppen: anders herlaadt Obsidian terwijl main.js nog binnenkomt
       const t0 = Date.now(); let started = false;
@@ -996,8 +988,19 @@ module.exports = class ArchiefMobiel extends Plugin {
         const el = Date.now() - t0;
         if (knows ? (started && !b) || (!started && el > 10000) : el > 20000) break;
       }
+    }
+    if (note.setMessage) note.setMessage('Kijken of er een nieuwe versie is…');
+    let v = null;
+    try { v = await this.fromGitHub(); } catch (e) { console.warn('archief-mobiel: bijwerken via GitHub lukte niet', e); }
+    note.hide();
+    if (v) {
+      new Notice(`${synced ? 'Gesynchroniseerd en n' : 'N'}ieuwe versie ${v} binnen. Obsidian herlaadt…`, 3000);
+      await new Promise(r => setTimeout(r, 1200));
+      this.app.commands.executeCommandById('app:reload'); return;
+    }
+    if (!synced) { new Notice('Remotely Save staat niet aan; kan niet synchroniseren.', 6000); return; }
+    {
       const code = await codeOnDisk(), now = await onDisk();
-      note.hide();
       if (code && code !== was) {
         new Notice(`Nieuwe versie ${code} binnen. Obsidian herlaadt…`, 3000);
         await new Promise(r => setTimeout(r, 1200));
