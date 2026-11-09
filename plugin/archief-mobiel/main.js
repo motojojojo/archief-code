@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.27.0';
+const BUILD = '0.28.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -2425,15 +2425,44 @@ class ArchiefView extends ItemView {
     });
     body.append(h('div', { class: 'am-bar' }, save));
   }
-  // het crème vlak groeit vloeiend uit tot het hele scherm, daarna verschijnt het bord eronder en vervaagt het vlak
+  // openen met een animatie: het crème vlak groeit uit tot het tekenvlak, de tekening schuift en groeit mee naar waar
+  // hij op het bord komt, en de balk bovenin en de strook onderin schuiven tegelijk binnen
   openBoardAnim(from, S, done) {
     const r = from.getBoundingClientRect();
     if (!r.width || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) return this.openBoard(S, done);
-    const fx = h('div', { class: 'am-grow' }), px = n => Math.round(n) + 'px';
-    Object.assign(fx.style, { left: px(r.left), top: px(r.top), width: px(r.width), height: px(r.height) });
-    document.body.append(fx);
-    requestAnimationFrame(() => requestAnimationFrame(() => { fx.classList.add('am-grow-on'); Object.assign(fx.style, { left: '0px', top: '0px', width: px(window.innerWidth), height: px(window.innerHeight) }); }));
-    setTimeout(() => { this.openBoard(S, done); requestAnimationFrame(() => { fx.classList.add('am-grow-out'); setTimeout(() => fx.remove(), 320); }); }, 420);
+    const pc = from.querySelector('canvas.am-preview-img'), pr = pc && pc.geo ? pc.getBoundingClientRect() : null;
+    this.openBoard(S, done);
+    const root = document.body.lastElementChild; if (!root || !root.classList.contains('am-full')) return;
+    root.classList.add('am-enter', 'am-enter-start');
+    root.append(h('div', { class: 'am-enter-strip am-enter-top' }), h('div', { class: 'am-enter-strip am-enter-bot' }));
+    const px = n => Math.round(n) + 'px', put = (el, q) => Object.assign(el.style, { left: px(q.l), top: px(q.t), width: px(q.w), height: px(q.h) });
+    const fx = h('div', { class: 'am-grow' }); put(fx, { l: r.left, t: r.top, w: r.width, h: r.height }); document.body.append(fx);
+    // de tekening zelf, zonder de rand eromheen (die heeft toch de kleur van het bord)
+    let pic = null, from2 = null;
+    if (pr && S.objs.length && pc.width > 1 && pc.height > 1) try {
+      const g0 = pc.geo, sc = pc.width / g0.W, pad = 40, cw = Math.max(1, Math.round((g0.W - 2 * pad) * sc)), ch = Math.max(1, Math.round((g0.H - 2 * pad) * sc));
+      pic = h('canvas', { class: 'am-grow-pic' }); pic.width = cw; pic.height = ch;
+      pic.getContext('2d').drawImage(pc, Math.round(pad * sc), Math.round(pad * sc), cw, ch, 0, 0, cw, ch);
+      // waar hij nu in het kleine vlak staat (object-fit: contain)
+      const a = pc.width / pc.height, dw = pr.width / pr.height > a ? pr.height * a : pr.width, dh = dw / a, d = dw / pc.width;
+      from2 = { l: pr.left + (pr.width - dw) / 2 + pad * sc * d, t: pr.top + (pr.height - dh) / 2 + pad * sc * d, w: cw * d, h: ch * d };
+      document.body.append(pic);
+    } catch (e) { console.warn(e); pic = null; }
+    // twee beeldjes later staat het bord klaar (maat en 'alles in beeld' zijn dan bepaald): dan pas weten we waar alles heen moet
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const wr = root.querySelector('.am-full-cv').getBoundingClientRect();
+      root.classList.remove('am-enter-start');
+      fx.classList.add('am-grow-on'); put(fx, { l: wr.left, t: wr.top, w: wr.width, h: wr.height });
+      if (pic) try {
+        const v = S.v || { x: 0, y: 0, k: 1 }, bs = S.objs.map(objBox), x0 = Math.min(...bs.map(q => q[0])), y0 = Math.min(...bs.map(q => q[1])), x1 = Math.max(...bs.map(q => q[2])), y1 = Math.max(...bs.map(q => q[3]));
+        const to = { l: wr.left + v.x + x0 * v.k, t: wr.top + v.y + y0 * v.k, w: (x1 - x0) * v.k, h: (y1 - y0) * v.k };
+        // op de eindplek zetten en met een transform terug naar de beginplek; dan de transform weghalen (vloeiend en scherp)
+        put(pic, to); pic.style.transform = `translate(${from2.l - to.l}px, ${from2.t - to.t}px) scale(${from2.w / to.w}, ${from2.h / to.h})`;
+        if (![to.w, to.h, from2.w, from2.h].every(n => n > 0 && isFinite(n))) throw new Error('geen maat');
+        pic.getBoundingClientRect(); pic.classList.add('am-grow-on'); pic.style.transform = 'none';
+      } catch (e) { pic.remove(); pic = null; }
+    }));
+    setTimeout(() => { root.classList.remove('am-enter'); root.querySelectorAll('.am-enter-strip').forEach(x => x.remove()); requestAnimationFrame(() => { fx.remove(); pic && pic.remove(); }); }, 480);
   }
   // het bord op het hele scherm: tekenen, gum, handje (verschuiven, met twee vingers groter/kleiner), tekst, foto.
   // Met twee vingers (buiten een foto) zoom en schuif je het hele bord
