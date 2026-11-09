@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.23.0';
+const BUILD = '0.24.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -2173,8 +2173,9 @@ class ArchiefView extends ItemView {
           h('b', { class: 'am-side-title' }, best.it.title),
           h('div', { class: 'am-side-meta' }, [fmtD(best.it.datum), proj || (best.it.lijnen[0] || ''), best.it.idee ? 'idee' : '', nv ? `${nv} verband${nv === 1 ? '' : 'en'}` : ''].filter(Boolean).join(' · ')),
           it ? h('button', { class: 'am-menu-btn am-primary am-side-open', onclick: () => {
-            close(); this.tab = 'archief';
-            this.editing = { it, datum: it.datum, lijnen: [...it.lijnen], tags: [...it.tags], producten: [...it.producten], onbekend: [...it.onbekend] };
+            const terug = { ...v }; close(); this.tab = 'archief';
+            // na opslaan (of Terug) weer naar de stroom, op dezelfde plek
+            this.editing = { it, datum: it.datum, lijnen: [...it.lijnen], tags: [...it.tags], producten: [...it.producten], onbekend: [...it.onbekend], stroom: terug };
             this.render().then(() => { this.contentEl.scrollTop = 0; });
           } }, 'Openen') : '',
           txt));
@@ -2946,7 +2947,7 @@ class ArchiefView extends ItemView {
   }
   renderEdit(body) {
     const E = this.editing, again = () => { const y = this.contentEl.scrollTop; this.render().then(() => { this.contentEl.scrollTop = y; }); };
-    body.append(h('button', { class: 'am-back', onclick: () => { this.editing = null; this.render(); } }, '‹ Terug'));
+    body.append(h('button', { class: 'am-back', onclick: async () => { const st = E.stroom; this.editing = null; await this.render(); if (st) this.openStroom(st); } }, E.stroom ? '‹ Terug naar de stroom' : '‹ Terug'));
     const fotos = E.it.imgs && E.it.imgs.length ? E.it.imgs : E.it.img ? [E.it.img] : [];
     if (fotos.length === 1) body.append(h('img', { class: 'am-big', src: this.app.vault.getResourcePath(fotos[0]) }));
     else if (fotos.length > 1) {
@@ -2972,8 +2973,9 @@ class ArchiefView extends ItemView {
       try {
         await this.plugin.updateItem(E.it.file, { ...E, ...this.plugin.keepProducts(E.tags, E.producten, E.onbekend, this.data.products) });
         if (plekOk(E.plek, E.datum, E.lijnen)) await this.plugin.applyPlek(E.plek, E.it.file.path, true);
-        new Notice('Opgeslagen'); this.editing = null; this.plugin.sync();
-        setTimeout(() => this.render(), 300); // even wachten tot Obsidian de notitie opnieuw heeft gelezen
+        new Notice('Opgeslagen'); const st = E.stroom; this.editing = null; this.plugin.sync();
+        // even wachten tot Obsidian de notitie opnieuw heeft gelezen; kwam je uit de stroom, dan weer daarheen
+        setTimeout(async () => { await this.render(); if (st) this.openStroom(st); }, st ? 700 : 300);
       } catch (e) { console.error(e); new Notice('Opslaan mislukt: ' + (e && e.message || e), 8000); save.disabled = false; }
     });
     body.append(h('div', { class: 'am-bar' }, save));
