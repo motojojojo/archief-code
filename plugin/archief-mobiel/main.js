@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.20.0';
+const BUILD = '0.21.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -1953,7 +1953,10 @@ class ArchiefView extends ItemView {
     const { items, pages } = this.plugin.stroom(C.skip), M = miniStroom(items, pages);
     if (!M.main.length) return new Notice('Er staan nog geen items in projecten.');
     const low = s => String(s).toLowerCase();
-    const cv = h('canvas'), pin = h('div', { class: 'am-pin' }, 'HIER'), wrap = h('div', { class: 'am-full-cv am-plek-cv' }, cv, pin);
+    const cv = h('canvas'), pin = h('div', { class: 'am-pin' }, 'HIER');
+    // vanuit de stroom: de pin is het item zelf (zijn plaatje, anders zijn naam), zodat je ziet wat je verplaatst
+    if (drag) { pin.classList.add('am-pin-item'); if (drag.idee) pin.classList.add('am-pin-idee'); pin.replaceChildren(drag.img ? h('img', { src: drag.img, alt: '' }) : h('span', {}, short(drag.title, 18))); }
+    const wrap = h('div', { class: 'am-full-cv am-plek-cv' }, cv, pin);
     const info = h('div', { class: 'am-plek-info' }), acts = h('div', { class: 'am-plek-acts' });
     const close = () => { SP.stop(); root.remove(); window.removeEventListener('resize', onResize); };
     const root = h('div', { class: 'am-full am-plek' },
@@ -2206,7 +2209,7 @@ class ArchiefView extends ItemView {
         // even wachten tot Obsidian de notitie opnieuw heeft gelezen, dan de stroom opnieuw tekenen op dezelfde plek
         await new Promise(r => setTimeout(r, 700));
         close(); this.data = await this.plugin.choices(); this.openStroom(keep);
-      }, { cx, cy, v: { ...v }, title: n.it.title, parent: root });
+      }, { cx, cy, v: { ...v }, title: n.it.title, parent: root, idee: n.it.idee, img: n.img ? this.app.vault.getResourcePath(n.img) : '' });
     };
     this.panZoom(cv, () => v, nv => { v = nv; soon(); }, pick, KMIN, KMAX, grab);
   }
