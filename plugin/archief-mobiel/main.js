@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.18.0';
+const BUILD = '0.19.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -1214,10 +1214,12 @@ module.exports = class ArchiefMobiel extends Plugin {
   // de datum gaat vooraan in de naam, zodat hij later nog klopt (ook als de foto zelf geen datum bevat)
   async dumpSave(f, taken) {
     await this.ensureDir(DUMP_DIR);
-    const d = await fileDate(f), nm = safeName(f.name || 'foto.jpg') || 'foto.jpg';
+    // meteen verkleinen (zoals bij een item): veel sneller synchroniseren en tonen. De datum komt uit het origineel en staat in de naam
+    const d = await fileDate(f), { data, ext } = await shrink(f);
+    let nm = safeName(f.name || 'foto.jpg') || 'foto.jpg'; nm = nm.replace(/\.[^.]+$/, '') + '.' + ext;
     const name = this.unique(DUMP_DIR, d.datum && !nameDate(nm) ? `${d.datum} ${nm}` : nm, taken);
     taken.add(normalizePath(`${DUMP_DIR}/${name}`).toLowerCase());
-    await this.app.vault.createBinary(normalizePath(`${DUMP_DIR}/${name}`), await f.arrayBuffer());
+    await this.app.vault.createBinary(normalizePath(`${DUMP_DIR}/${name}`), data);
   }
   taken() { return new Set(this.app.vault.getFiles().map(f => f.path.toLowerCase())); }
   unique(dir, name, taken) {
@@ -1427,14 +1429,8 @@ class ArchiefView extends ItemView {
   fitBottom() {
     const root = this.contentEl;
     const nav = [...document.querySelectorAll('.mobile-navbar, .mobile-toolbar')].find(el => { const r = el.getBoundingClientRect(); return r.height > 0 && r.top < window.innerHeight && getComputedStyle(el).visibility !== 'hidden'; });
+    // alleen Obsidians eigen balk (die verbergen we meestal); gokken naar andere zwevende dingen zette de knoppen soms halverwege het scherm
     let cover = nav ? Math.max(0, Math.round(window.innerHeight - nav.getBoundingClientRect().top)) : 0;
-    // anders heet: kijk wat er onderin over het scherm zweeft (niet van dit scherm zelf)
-    if (!nav && document.body.classList.contains('is-mobile')) for (const y of [window.innerHeight - 20, window.innerHeight - 50]) {
-      for (let el = document.elementFromPoint(window.innerWidth / 2, y); el && el !== document.body; el = el.parentElement) {
-        if (root.contains(el) || el.contains(root)) continue;
-        if (/fixed|absolute/.test(getComputedStyle(el).position)) { cover = Math.max(cover, Math.round(window.innerHeight - el.getBoundingClientRect().top)); break; }
-      }
-    }
     cover = Math.min(cover, 160);
     root.style.setProperty('--am-bottom', cover + 'px');
     root.style.setProperty('--am-safe', cover ? '0px' : 'env(safe-area-inset-bottom)');
@@ -2741,8 +2737,34 @@ class ArchiefView extends ItemView {
         const b = h('button', { class: 'am-dump-th', onclick: () => { sel.has(f.path) ? sel.delete(f.path) : sel.add(f.path); mark(f); upd(); } },
           IMG_EXT.test(f.name) ? h('img', { src: this.app.vault.getResourcePath(f), loading: 'lazy', decoding: 'async' }) : h('div', { class: 'am-vid' }, 'video'),
           h('span', { class: 'am-dump-ok' }, '✓'));
-        ths.set(f.path, b); grid.append(b); mark(f);
+        b.dataset.i = ths.size; ths.set(f.path, b); grid.append(b); mark(f);
       }
+      // vegen om te kiezen: begin opzij te vegen op een foto, dan wordt alles van die foto tot waar je vinger is gekozen
+      // (of juist uitgezet, als de eerste al gekozen was). Recht omhoog of omlaag vegen scrolt gewoon
+      let sw = null, noClick = false;
+      const at = t => { const el = document.elementFromPoint(t.clientX, t.clientY), c = el && el.closest('.am-dump-th'); return c && grid.contains(c) ? +c.dataset.i : -1; };
+      grid.addEventListener('touchstart', e => { const i = e.touches.length === 1 ? at(e.touches[0]) : -1; sw = i < 0 ? null : { i, x: e.touches[0].clientX, y: e.touches[0].clientY, on: false }; }, { passive: true });
+      grid.addEventListener('touchmove', e => {
+        if (!sw) return;
+        const t = e.touches[0];
+        if (!sw.on) {
+          const dx = Math.abs(t.clientX - sw.x), dy = Math.abs(t.clientY - sw.y);
+          if (dy > 10 && dy >= dx) { sw = null; return; } // scrollen
+          if (dx < 10) return;
+          sw.on = true; sw.keep = new Set(sel); sw.to = !sel.has(files[sw.i].path);
+        }
+        e.preventDefault();
+        // bij de rand van het scherm schuift de lijst mee
+        const r = this.contentEl.getBoundingClientRect();
+        if (t.clientY > r.bottom - 120) this.contentEl.scrollTop += 14; else if (t.clientY < r.top + 140) this.contentEl.scrollTop -= 14;
+        const j = at(t); if (j < 0 || j === sw.j) return; sw.j = j;
+        const lo = Math.min(sw.i, j), hi = Math.max(sw.i, j);
+        files.forEach((f, k) => { const want = k >= lo && k <= hi ? sw.to : sw.keep.has(f.path); if (want !== sel.has(f.path)) { want ? sel.add(f.path) : sel.delete(f.path); mark(f); } });
+        upd();
+      }, { passive: false });
+      const end = () => { if (sw && sw.on) { noClick = true; setTimeout(() => { noClick = false; }, 400); } sw = null; };
+      grid.addEventListener('touchend', end); grid.addEventListener('touchcancel', end);
+      grid.addEventListener('click', e => { if (noClick) { e.stopPropagation(); e.preventDefault(); noClick = false; } }, true);
       body.append(grid, h('div', { class: 'am-bar am-dump-bar' }, bank, go, del)); upd();
     }
     // items in je archief waar nog tags of een project aan ontbreken

@@ -214,7 +214,9 @@ body.am-actief .mobile-navbar { display: none !important; }
 .am-dump-th.am-on { outline: 3px solid var(--interactive-accent); outline-offset: -3px; }
 .am-dump-th.am-on img { opacity: .75; }
 .am-dump-ok { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; background: var(--interactive-accent); color: var(--text-on-accent); font-size: 13px; display: flex; align-items: center; justify-content: center; }
-.am-dump-bar { display: flex; gap: 8px; }
+/* de balk onder de foto's plakt onderaan het scherm zolang er foto's onder staan, daarna komt hij gewoon na de laatste foto */
+.am-dump-bar { display: flex; gap: 8px; position: sticky; bottom: var(--am-bottom, 0px); margin: 0 -12px; }
+.am-dump { touch-action: pan-y; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .am-dump-bar .am-save { flex: 1; }
 .am-dump-del { flex: 0 0 52px; font-size: 18px; border-radius: 12px; }
 .am-sub { margin: 18px 0 0; font-size: 15px; }
