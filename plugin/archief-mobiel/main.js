@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.26.0';
+const BUILD = '0.27.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -2403,7 +2403,7 @@ class ArchiefView extends ItemView {
     naam.addEventListener('input', () => { S.naam = naam.value; });
     body.append(naam);
     // klein voorbeeld van het bord; tikken opent het bord op het hele scherm
-    const prev = h('button', { class: 'am-preview', onclick: () => this.openBoard(S, again) },
+    const prev = h('button', { class: 'am-preview', onclick: () => this.openBoardAnim(prev, S, again) },
       h('span', { class: 'am-preview-tip' }, S.objs.length ? 'Tik om te bewerken' : 'Tik om te tekenen'));
     if (S.objs.length) boardCanvas(S.objs, 700).then(c => { c.className = 'am-preview-img'; prev.prepend(c); });
     body.append(prev);
@@ -2424,6 +2424,16 @@ class ArchiefView extends ItemView {
       again();
     });
     body.append(h('div', { class: 'am-bar' }, save));
+  }
+  // het crème vlak groeit vloeiend uit tot het hele scherm, daarna verschijnt het bord eronder en vervaagt het vlak
+  openBoardAnim(from, S, done) {
+    const r = from.getBoundingClientRect();
+    if (!r.width || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) return this.openBoard(S, done);
+    const fx = h('div', { class: 'am-grow' }), px = n => Math.round(n) + 'px';
+    Object.assign(fx.style, { left: px(r.left), top: px(r.top), width: px(r.width), height: px(r.height) });
+    document.body.append(fx);
+    requestAnimationFrame(() => requestAnimationFrame(() => { fx.classList.add('am-grow-on'); Object.assign(fx.style, { left: '0px', top: '0px', width: px(window.innerWidth), height: px(window.innerHeight) }); }));
+    setTimeout(() => { this.openBoard(S, done); requestAnimationFrame(() => { fx.classList.add('am-grow-out'); setTimeout(() => fx.remove(), 320); }); }, 420);
   }
   // het bord op het hele scherm: tekenen, gum, handje (verschuiven, met twee vingers groter/kleiner), tekst, foto.
   // Met twee vingers (buiten een foto) zoom en schuif je het hele bord
