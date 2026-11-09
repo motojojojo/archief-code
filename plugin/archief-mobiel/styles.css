@@ -300,6 +300,7 @@ body.am-actief .mobile-navbar { display: none !important; }
 .am-grow-pic.am-grow-on { transition: transform .56s cubic-bezier(.22,.9,.24,1); }
 .am-full.am-enter { background: transparent; }
 .am-full.am-enter .am-full-cv { opacity: 0; }
+.am-full.am-enter.am-enter-board .am-full-cv { opacity: 1; }
 .am-full.am-enter .am-full-bar, .am-full.am-enter .am-full-extra { position: relative; z-index: 2; background: var(--background-primary); }
 /* alles van het menu schuift even ver (de hoogte van het hele menu), dus het blijft één geheel; met een zachte schaduw eronder */
 .am-full.am-enter .am-full-bar, .am-full.am-enter .am-full-extra, .am-enter-strip { transition: transform .46s cubic-bezier(.2,.85,.25,1), box-shadow .46s ease; will-change: transform; }
@@ -309,4 +310,6 @@ body.am-actief .mobile-navbar { display: none !important; }
 .am-enter-bot { bottom: 0; height: env(safe-area-inset-bottom); }
 .am-full.am-enter-start .am-full-bar, .am-full.am-enter-start .am-full-extra, .am-full.am-enter-start .am-enter-top { transform: translateY(calc(-1 * var(--am-top, 160px))); }
 .am-full.am-enter-start .am-full-extra { box-shadow: none; }
+.am-full.am-enter-done .am-full-extra { box-shadow: 0 6px 18px rgba(0,0,0,0); transition: box-shadow .2s ease; }
+.am-full.am-notrans, .am-full.am-notrans * { transition: none !important; }
 .am-full.am-enter-start .am-enter-bot { transform: translateY(100%); }

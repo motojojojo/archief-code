@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.30.0';
+const BUILD = '0.31.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -2449,17 +2449,20 @@ class ArchiefView extends ItemView {
     this.openBoard(S, done);
     const root = document.body.lastElementChild; if (!root || !root.classList.contains('am-full')) return;
     // het menu bovenin (balk + kleuren + de strook boven de balk) schuift als één geheel binnen: even ver als het samen hoog is
-    root.classList.add('am-enter');
-    const ex = root.querySelector('.am-full-extra'), top = (ex && ex.offsetHeight ? ex : root.querySelector('.am-full-bar')).getBoundingClientRect().bottom - root.getBoundingClientRect().top;
-    root.style.setProperty('--am-top', Math.ceil(top + 12) + 'px');
-    root.classList.add('am-enter-start');
+    // meten met offsetTop/offsetHeight (die tellen geen verschuiving mee), en de beginstand neerzetten zónder overgang:
+    // anders zie je het menu eerst even staan en wegschuiven voordat het binnenkomt
+    const ex = root.querySelector('.am-full-extra'), last = ex && ex.offsetHeight ? ex : root.querySelector('.am-full-bar');
+    root.style.setProperty('--am-top', Math.ceil(last.offsetTop + last.offsetHeight + 16) + 'px');
+    root.classList.add('am-notrans', 'am-enter', 'am-enter-start');
     root.append(h('div', { class: 'am-enter-strip am-enter-top' }), h('div', { class: 'am-enter-strip am-enter-bot' }));
     const fx = h('div', { class: 'am-grow' }); put(fx, { l: r.left, t: r.top, w: r.width, h: r.height });
     document.body.append(fx); if (pic) document.body.append(pic);
-    const finish = () => { root.classList.remove('am-enter'); root.style.removeProperty('--am-top'); root.querySelectorAll('.am-enter-strip').forEach(x => x.remove()); requestAnimationFrame(() => { fx.remove(); pic && pic.remove(); }); };
+    root.offsetHeight; root.classList.remove('am-notrans');
+    const finish = () => { root.classList.remove('am-enter', 'am-enter-done', 'am-enter-board'); root.style.removeProperty('--am-top'); root.querySelectorAll('.am-enter-strip').forEach(x => x.remove()); requestAnimationFrame(() => { fx.remove(); pic && pic.remove(); }); };
     // twee beeldjes later staat het bord klaar (maat en 'alles in beeld' bepaald): dan weten we waar de tekening heen moet
     requestAnimationFrame(() => requestAnimationFrame(async () => {
-      fx.classList.add('am-grow-on'); put(fx, { l: 0, t: 0, w: window.innerWidth, h: window.innerHeight });
+      // eerst de scherpe tekening klaarzetten, dan vlak en tekening in hetzelfde beeldje laten beginnen (anders lopen ze uit de pas)
+      let go = null;
       if (pic) try {
         const wr = root.querySelector('.am-full-cv').getBoundingClientRect(), v = S.v || { x: 0, y: 0, k: 1 };
         const to = { l: wr.left + v.x + bb[0] * v.k, t: wr.top + v.y + bb[1] * v.k, w: (bb[2] - bb[0]) * v.k, h: (bb[3] - bb[1]) * v.k };
@@ -2469,10 +2472,15 @@ class ArchiefView extends ItemView {
         const g = hi.getContext('2d'); g.fillStyle = BORD_BG; g.fillRect(0, 0, hi.width, hi.height);
         g.setTransform(v.k * dpr, 0, 0, v.k * dpr, -bb[0] * v.k * dpr, -bb[1] * v.k * dpr); await paintBoard(g, S.objs);
         put(hi, to); hi.style.transform = `translate(${start.l - to.l}px, ${start.t - to.t}px) scale(${start.w / to.w}, ${start.h / to.h})`;
-        pic.replaceWith(hi); pic = hi;
-        hi.getBoundingClientRect(); hi.classList.add('am-grow-on'); hi.style.transform = 'none';
+        pic.replaceWith(hi); pic = hi; hi.getBoundingClientRect();
+        go = () => { hi.classList.add('am-grow-on'); hi.style.transform = 'none'; };
       } catch (e) { console.warn(e); }
-      setTimeout(() => { root.classList.remove('am-enter-start'); setTimeout(finish, T2); }, T1);
+      fx.classList.add('am-grow-on'); put(fx, { l: 0, t: 0, w: window.innerWidth, h: window.innerHeight }); go && go();
+      // stap 2: menu en strook schuiven binnen; daarna verdwijnt de schaduw onder het menu zacht
+      // zodra het vlak het scherm vult, neemt het echte bord het over (dan kun je ook meteen tekenen)
+      setTimeout(() => { root.classList.add('am-enter-board'); requestAnimationFrame(() => { pic && pic.remove(); pic = null; }); }, T1 + 30);
+      // het menu begint al als het vlak bijna klaar is (het laatste stukje gaat heel langzaam), zodat er geen stilstand is
+      setTimeout(() => { root.classList.remove('am-enter-start'); setTimeout(() => { root.classList.add('am-enter-done'); setTimeout(finish, 220); }, T2); }, Math.round(T1 * .8));
     }));
   }
   // het bord op het hele scherm: tekenen, gum, handje (verschuiven, met twee vingers groter/kleiner), tekst, foto.
