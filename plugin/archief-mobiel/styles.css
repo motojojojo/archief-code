@@ -284,3 +284,10 @@ body.am-actief .mobile-navbar { display: none !important; }
 .am-werk-del { flex: 0 0 40px; height: 40px; padding: 0; font-size: 18px; border-radius: 10px; }
 .am-werk-add { align-self: flex-start; height: 36px; border-radius: 10px; }
 .am-log-uren { font-weight: normal; color: var(--text-muted); }
+/* het item dat je in de stroom verplaatst, aan je vinger */
+.am-pin.am-pin-item { padding: 4px; border-radius: 8px; }
+.am-pin-item img { display: block; width: 64px; height: 64px; object-fit: cover; border-radius: 5px; }
+.am-pin-item span { display: block; max-width: 140px; padding: 4px 6px; }
+.am-pin-item.am-pin-idee { border-radius: 50%; }
+.am-pin-item.am-pin-idee img { border-radius: 50%; }
+.am-pin-item.am-pin-idee::after { display: none; }

@@ -1,7 +1,7 @@
 {
   "id": "archief-mobiel",
   "name": "Archief mobiel",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "minAppVersion": "1.4.0",
   "description": "Items toevoegen en taggen in het archief, vanaf je telefoon.",
   "author": "Milo",
