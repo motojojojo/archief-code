@@ -1,0 +1,116 @@
+{
+  "tags": [
+    "kleur",
+    "textuur"
+  ],
+  "beelden": {
+    "beeld 1.png": {
+      "datum": "2026-11-01",
+      "bron": "verzonnen",
+      "notitie": "",
+      "tags": [
+        "kleur"
+      ],
+      "ar": 1.3333,
+      "box": "testbox1"
+    },
+    "beeld 2.png": {
+      "datum": "2026-11-01",
+      "bron": "verzonnen",
+      "notitie": "",
+      "tags": [
+        "textuur"
+      ],
+      "ar": 1.3333,
+      "box": "testbox1",
+      "tekening": [
+        {
+          "c": "#ff5a4f",
+          "w": 6,
+          "p": [
+            100,
+            100,
+            300,
+            250,
+            500,
+            150,
+            700,
+            400
+          ]
+        }
+      ],
+      "briefjes": [
+        {
+          "x": 120,
+          "y": 500,
+          "t": "testbriefje"
+        }
+      ]
+    },
+    "beeld 3.png": {
+      "datum": "2026-11-01",
+      "bron": "verzonnen",
+      "notitie": "",
+      "tags": [
+        "kleur"
+      ],
+      "ar": 1.3333,
+      "box": "testbox1"
+    },
+    "beeld 4.png": {
+      "datum": "2026-11-01",
+      "bron": "verzonnen",
+      "notitie": "",
+      "tags": [
+        "textuur"
+      ],
+      "ar": 0.75
+    },
+    "beeld 5.png": {
+      "datum": "2026-11-01",
+      "bron": "verzonnen",
+      "notitie": "",
+      "tags": [
+        "kleur"
+      ],
+      "ar": 1.3333
+    },
+    "beeld 6.png": {
+      "datum": "2026-11-01",
+      "bron": "verzonnen",
+      "notitie": "",
+      "tags": [
+        "textuur"
+      ],
+      "ar": 2.4
+    },
+    "beeld 7.png": {
+      "datum": "2026-11-01",
+      "bron": "verzonnen",
+      "notitie": "",
+      "tags": [
+        "kleur"
+      ],
+      "ar": 0.75
+    },
+    "beeld 8.png": {
+      "datum": "2026-11-01",
+      "bron": "verzonnen",
+      "notitie": "",
+      "tags": [
+        "textuur"
+      ],
+      "ar": 1.0
+    }
+  },
+  "boxes": [
+    {
+      "id": "testbox1",
+      "naam": "Testbox",
+      "x": 0.1,
+      "y": 0.1,
+      "w": 0.3,
+      "h": 0.3
+    }
+  ]
+}

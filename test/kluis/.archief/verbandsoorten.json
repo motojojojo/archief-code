@@ -1,0 +1,19 @@
+{
+  "soorten": [
+    {
+      "naam": "bouwt voort op",
+      "kleur": "#e8c48a",
+      "stijl": "lijn"
+    },
+    {
+      "naam": "inspireerde",
+      "kleur": "#e0915a",
+      "stijl": "streep"
+    },
+    {
+      "naam": "tegenstelling",
+      "kleur": "#d9645c",
+      "stijl": "streep"
+    }
+  ]
+}

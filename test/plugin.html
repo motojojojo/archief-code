@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Archief mobiel test</title>
+<!-- Draait de telefoon-plugin (../plugin/archief-mobiel) in een nep-Obsidian op de NEP-kluis in test/kluis. -->
+<style>
+:root{--background-primary:#1e1e1e;--background-secondary:#2a2a2a;--background-modifier-border:#3a3a3a;--interactive-accent:#7f6df2;--text-on-accent:#fff;--text-muted:#aaa;--text-faint:#777;--text-error:#f66}
+body{margin:0;background:var(--background-primary);color:#ddd;font:15px -apple-system,system-ui,sans-serif}
+button{background:#363636;color:#ddd;border:0;border-radius:6px;padding:4px 10px;font:inherit;cursor:pointer}
+input,textarea{background:#2a2a2a;color:#ddd;border:1px solid #444;box-sizing:border-box;font:inherit}
+#view{height:100vh;overflow:auto}
+#toasts{position:fixed;top:8px;right:8px;z-index:9;display:flex;flex-direction:column;gap:4px}
+#toasts div{background:#444;color:#fff;padding:6px 10px;border-radius:6px;font-size:13px}
+</style>
+<link rel="stylesheet" href="../plugin/archief-mobiel/styles.css">
+</head><body><div id="view"></div><div id="toasts"></div><div class="mobile-navbar" style="position:fixed;left:40px;right:40px;bottom:24px;height:50px;border-radius:25px;background:#555;z-index:9"></div>
+<script>
+// ---- nep-Obsidian, net genoeg om de plugin te draaien ----
+const BASE = 'kluis/';
+const store = new Map();        // pad -> {text?|blob?, mtime}
+const created = [];             // wat de plugin schreef
+window.LOG = [];
+function parseFM(text) {
+  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---/); if (!m) return {};
+  const fm = {}; let key = null;
+  const val = v => { v = v.trim(); if (v === '' ) return null; if (v === '[]') return []; if (/^".*"$/.test(v)) { try { return JSON.parse(v); } catch (e) { return v.slice(1, -1); } } if (/^'.*'$/.test(v)) return v.slice(1, -1); return v; };
+  for (const line of m[1].split(/\r?\n/)) {
+    const li = line.match(/^\s+-\s+(.*)$/);
+    if (li && key) { if (!Array.isArray(fm[key])) fm[key] = []; fm[key].push(val(li[1])); continue; }
+    const kv = line.match(/^([^\s:#][^:]*):\s?(.*)$/);
+    if (kv) { key = kv[1].trim(); fm[key] = val(kv[2]); }
+  }
+  return fm;
+}
+function dumpFM(fm, body) {
+  const L = [];
+  for (const [k, v] of Object.entries(fm)) {
+    if (Array.isArray(v)) L.push(v.length ? `${k}:\n` + v.map(x => `  - ${/[\[\]:|]/.test(x) ? JSON.stringify(x) : x}`).join('\n') : `${k}: []`);
+    else L.push(`${k}: ${v == null ? '' : (/[\[\]:|]/.test(v) ? JSON.stringify(v) : v)}`.trimEnd());
+  }
+  return `---\n${L.join('\n')}\n---\n${body}`;
+}
+class TFile { constructor(path) { this.path = path; this.name = path.split('/').pop(); this.basename = this.name.replace(/\.[^.]+$/, ''); this.extension = (this.name.match(/\.([^.]+)$/) || [, ''])[1]; this.stat = { mtime: Date.now(), size: 0 }; } }
+const files = new Map();
+const app = {
+  vault: {
+    rename: async (f, np) => { const s0 = store.get(f.path); files.delete(f.path); store.delete(f.path); const n = new TFile(np); files.set(np, n); store.set(np, s0); LOG.push(['vrename', f.path, np]); },
+    getMarkdownFiles: () => [...files.values()].filter(f => f.extension === 'md'),
+    getFiles: () => [...files.values()],
+    readBinary: async f => { const s = store.get(f.path); const b = s && s.blob ? s.blob : await (await fetch(BASE + f.path.split('/').map(encodeURIComponent).join('/'))).blob(); return await b.arrayBuffer(); },
+    getAbstractFileByPath: p => files.get(p) || ([...files.keys()].some(k => k.startsWith(p + '/')) ? { path: p, children: [] } : null),
+    createFolder: async p => { LOG.push(['map', p]); },
+    createBinary: async (p, data) => { if (files.has(p)) throw new Error('bestaat al: ' + p); const f = new TFile(p); f.stat.size = data.byteLength; files.set(p, f); store.set(p, { blob: new Blob([data]) }); created.push(p); LOG.push(['bin', p, data.byteLength]); return f; },
+    create: async (p, text) => { if (files.has(p)) throw new Error('bestaat al: ' + p); const f = new TFile(p); files.set(p, f); store.set(p, { text }); created.push(p); LOG.push(['md', p]); return f; },
+    read: async f => store.get(f.path).text,
+    cachedRead: async f => store.get(f.path).text, on: (n, fn) => { (window.EV ||= []).push([n, fn]); return {}; },
+    modify: async (f, t) => { store.get(f.path).text = t; LOG.push(['modify', f.path]); },
+    trash: async (f, sys) => { files.delete(f.path); LOG.push(['trash', f.path, sys]); },
+    getResourcePath: f => { const s = store.get(f.path); if (s && s.blob) return s.url || (s.url = URL.createObjectURL(s.blob)); return BASE + f.path.split('/').map(encodeURIComponent).join('/'); },
+    adapter: {
+      exists: async p => files.has(p) || p === '.archief/taggroepen.json' || p === 'PLUGIN/taggroepen.json',
+      write: async (p, t) => { const f = new TFile(p); files.set(p, f); store.set(p, { text: t }); created.push(p); LOG.push(['write', p, t.length]); }, read: async p => p === 'PLUGIN/manifest.json' ? JSON.stringify({ version: window.DISKVER }) : p === 'PLUGIN/main.js' ? `const BUILD = '${window.CODEVER || window.DISKVER}';` : store.has(p) ? store.get(p).text : p === 'PLUGIN/taggroepen.json' ? (await fetch(BASE + '.archief/taggroepen.json')).text() : (await fetch(BASE + p)).text(),
+    },
+  },
+  metadataCache: {
+    on: (n, fn) => { (window.EV ||= []).push(['mc-' + n, fn]); return {}; },
+    getFileCache: f => { const s = store.get(f.path); if (!s || s.text == null) return null; const embeds = [...s.text.matchAll(/!\[\[([^\]]+)\]\]/g)].map(m => ({ link: m[1] })); return { frontmatter: parseFM(s.text), embeds }; },
+    getFirstLinkpathDest: (link) => { const n = link.toLowerCase(); return [...files.values()].find(f => f.name.toLowerCase() === n || f.basename.toLowerCase() === n) || null; },
+  },
+  fileManager: {
+    renameFile: async (f, np) => { const s = store.get(f.path); files.delete(f.path); store.delete(f.path); const n = new TFile(np); files.set(np, n); store.set(np, s); LOG.push(['rename', f.path, np]); },
+    processFrontMatter: async (f, fn) => { const s = store.get(f.path); const fm = parseFM(s.text); fn(fm); const body = s.text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, ''); s.text = dumpFM(fm, body); LOG.push(['fm', f.path]); },
+  },
+  commands: { commands: { 'remotely-save:start-sync': {} }, executeCommandById: id => { LOG.push(['cmd', id]); if (id === 'remotely-save:start-sync') { const rs = app.plugins.plugins['remotely-save']; rs.syncStatus = 'syncing'; setTimeout(() => { if (window.NEWVER) window.DISKVER = window.NEWVER; rs.syncStatus = 'idle'; }, 2500); } } },
+  workspace: { on: () => ({}), onLayoutReady: fn => setTimeout(fn, 0), activeLeaf: null, getLeavesOfType: () => window.VIEW ? [{ view: window.VIEW }] : [] },
+};
+const leaf = { app };
+class Plugin { constructor(app) { this.app = app; this.views = {}; } registerEvent() {} registerView(t, fn) { this.views[t] = fn; } addRibbonIcon() {} addCommand() {} }
+class ItemView { constructor(leaf) { this.leaf = leaf; this.app = leaf.app; this.contentEl = document.getElementById('view'); } registerDomEvent(el, ev, fn) { el.addEventListener(ev, fn); } }
+class Notice { constructor(msg, ms = 4000) { const d = this.d = document.createElement('div'); d.textContent = msg; document.getElementById('toasts').append(d); LOG.push(['notice', msg]); if (ms) setTimeout(() => d.remove(), ms); } hide() { this.d.remove(); } }
+// nep-GitHub voor de ↻-knop: window.GH = {bestand: tekst} doet alsof dat op GitHub staat, window.GH_OFFLINE = true geeft geen internet
+const requestUrl = async ({ url }) => { LOG.push(['url', url]); if (window.GH_OFFLINE) throw new Error('offline'); const f = decodeURIComponent((url.match(/archief-mobiel\/([^?]+)/) || [, ''])[1]); if (window.GH && f in window.GH) return { status: 200, text: window.GH[f] }; const r = await fetch('../plugin/archief-mobiel/' + f); return { status: r.status, text: await r.text() }; };
+const obsidian = { Plugin, ItemView, Notice, TFile, requestUrl, normalizePath: p => p.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^\/|\/$/g, '') };
+window.require = n => { if (n === 'obsidian') return obsidian; throw new Error(n); };
+window.STORE = store; window.FILES = files; window.CREATED = created;
+
+(async () => {
+  const list = await (await fetch('files.json')).json();
+  await Promise.all(list.map(async p => { const f = new TFile(p); files.set(p, f); if (p.endsWith('.md')) store.set(p, { text: await (await fetch(BASE + p.split('/').map(encodeURIComponent).join('/'))).text() }); }));
+  const src = await (await fetch('../plugin/archief-mobiel/main.js?' + Date.now())).text();
+  const module = { exports: {} };
+  new Function('module', 'exports', 'require', src)(module, module.exports, window.require);
+  const P = new module.exports(app); P.manifest = await (await fetch('../plugin/archief-mobiel/manifest.json')).json(); P.manifest.dir = 'PLUGIN'; window.DISKVER = P.manifest.version; app.plugins = { plugins: { 'remotely-save': { syncStatus: 'idle' } } }; await P.onload();
+  window.PLUGIN = P;
+  window.VIEW = P.views['archief-mobiel'](leaf);
+  await VIEW.onOpen();
+})();
+</script></body></html>

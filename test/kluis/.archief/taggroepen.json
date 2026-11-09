@@ -1,0 +1,26 @@
+{
+  "groepen": {
+    "materiaal": [
+      "papier",
+      "klei",
+      "textiel",
+      "metaal"
+    ],
+    "type": [
+      "materiaal-onderzoek",
+      "beeld-onderzoek",
+      "idee",
+      "vorm-onderzoek"
+    ],
+    "locatie": [
+      "atelier",
+      "buiten",
+      "school"
+    ],
+    "techniek": [
+      "verven",
+      "gieten",
+      "naaien"
+    ]
+  }
+}
