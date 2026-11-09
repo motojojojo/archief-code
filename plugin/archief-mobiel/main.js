@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.25.0';
+const BUILD = '0.26.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -2399,7 +2399,7 @@ class ArchiefView extends ItemView {
   /* ---------- idee: schetsen zoals in de Ideeënfabriek ---------- */
   renderIdea(body, again) {
     const S = this.sketch || (this.sketch = { objs: [], undo: [], redo: [], ink: INKS[0], size: 4, tool: 'pen', naam: '', lijnen: [], tekst: false, busy: false, v: null });
-    const naam = h('input', { type: 'text', placeholder: 'Naam van het idee (mag leeg)', value: S.naam });
+    const naam = h('input', { type: 'text', placeholder: 'Naam van het idee', value: S.naam });
     naam.addEventListener('input', () => { S.naam = naam.value; });
     body.append(naam);
     // klein voorbeeld van het bord; tikken opent het bord op het hele scherm
@@ -2407,7 +2407,10 @@ class ArchiefView extends ItemView {
       h('span', { class: 'am-preview-tip' }, S.objs.length ? 'Tik om te bewerken' : 'Tik om te tekenen'));
     if (S.objs.length) boardCanvas(S.objs, 700).then(c => { c.className = 'am-preview-img'; prev.prepend(c); });
     body.append(prev);
-    body.append(this.lijnBlock(S.lijnen, again, { holder: S, get: () => S.datum || isoDay(Date.now()), set: d => { S.datum = d; }, skip: null }));
+    // alleen de plek in de stroom; het project volgt vanzelf uit die plek
+    const C = { holder: S, get: () => S.datum || isoDay(Date.now()), set: d => { S.datum = d; }, skip: null };
+    const after = () => { S.lijnen.splice(0, S.lijnen.length, ...(S.plek ? [S.plek.lijn] : [])); again(); };
+    body.append(h('div', { class: 'am-field' }, h('button', { class: 'am-plek-open', onclick: () => this.pickPlek(C, S.lijnen, after) }, '⤳  Plek kiezen in de stroom'), this.plekLine(C, after)));
     const save = h('button', { class: 'am-save', disabled: S.busy }, S.busy ? 'Bewaren…' : 'Klaar → opslaan');
     save.addEventListener('click', async () => {
       if (!S.objs.length) return new Notice('Het bord is nog leeg.');
