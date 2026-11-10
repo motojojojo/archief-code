@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.36.0';
+const BUILD = '0.37.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -2223,7 +2223,7 @@ class ArchiefView extends ItemView {
         g.fillStyle = '#a58cff'; g.beginPath(); g.arc(x1, y1, 6, 0, 7); g.fill();
         if (t && t !== sel) { const S = t.S * v.k + 10; g.lineWidth = 3; g.strokeRect(v.x + t.X * v.k - S / 2, v.y + t.Y * v.k - S / 2, S, S); }
       }
-      placeProds();
+      placeProds(); placeSel();
     };
     // zacht naar een nieuwe plek glijden (knoppen, item kiezen) in plaats van verspringen
     const glideTo = nv => animV(() => v, x => { v = x; soon(); }, nv);
@@ -2233,6 +2233,20 @@ class ArchiefView extends ItemView {
     const unpick = () => { sel = null; link = null; prodBox.replaceChildren(); side.hidden = true; bar.hidden = false; info.replaceChildren('Tik op een item.'); acts.replaceChildren(); draw(); };
     // boven het gekozen item: de producten die erbij horen (of een vraagteken per tag waar nog geen product bij gekozen is)
     const prodBox = h('div', { class: 'am-sprods', hidden: true }); wrap.append(prodBox);
+    // het gekozen item scherp: de echte foto als afbeelding over de stroom (de stroom zelf tekent kleinere plaatjes, voor de snelheid)
+    const selImg = h('img', { class: 'am-selimg', alt: '', decoding: 'async', hidden: true }); wrap.append(selImg);
+    let selSrc = '';
+    const placeSel = () => {
+      const f = sel && sel.img;
+      if (!f) { selImg.hidden = true; selSrc = ''; return; }
+      const src = this.app.vault.getResourcePath(f);
+      if (src !== selSrc) { selSrc = src; selImg.hidden = true; selImg.classList.toggle('am-selimg-rond', !!sel.it.idee); selImg.onload = () => { if (selSrc === src) { selImg.hidden = false; placeSel(); } }; selImg.src = src; return; }
+      if (!selImg.complete || !selImg.naturalWidth) return;
+      // net binnen de gekleurde rand van het kaartje
+      const S = sel.S * v.k * 1.9 - 4; selImg.hidden = false;
+      selImg.style.width = selImg.style.height = S + 'px';
+      selImg.style.transform = `translate(${v.x + sel.X * v.k - S / 2}px, ${v.y + sel.Y * v.k - S / 2}px)`;
+    };
     let link = null; // verband leggen: { to: [x, y] } zolang je een lijn trekt
     const placeProds = () => {
       if (!sel || !prodBox.childElementCount || link || !side.hidden) { prodBox.hidden = true; return; }
@@ -2326,8 +2340,7 @@ class ArchiefView extends ItemView {
           this.editing = { it, datum: it.datum, lijnen: [...it.lijnen], tags: [...it.tags], producten: [...it.producten], onbekend: [...it.onbekend], stroom: terug };
           this.render().then(() => { this.contentEl.scrollTop = 0; });
         } }, 'Bewerken') : null,
-        h('button', { class: 'am-menu-btn', onclick: linkMode }, 'Verband leggen'),
-        h('button', { class: 'am-menu-btn', onclick: () => showSide(best) }, 'Bekijken')));
+        h('button', { class: 'am-menu-btn', onclick: linkMode }, 'Verband leggen')));
       showProds(it);
       draw();
       // het item (en de producten erboven) in beeld houden
@@ -2350,44 +2363,6 @@ class ArchiefView extends ItemView {
       link.to = [px, py]; draw();
       return { move: (cx, cy) => { link.to = [cx - b0.left, cy - b0.top]; soon(); },
         end: () => { const [x, y] = link.to || [0, 0], t = SP.hit(v, x, y), a = sel; link.to = null; draw(); if (t && t !== a) { link = null; draw(); vbSheet(a, t); } } };
-    };
-    // de foto groot met de tekst (zoals eerst bij tikken)
-    const showSide = best => {
-      const it = byPath.get(best.it.path), proj = best.row.side ? '' : best.row.lijn;
-      const nv = SP.vbs.filter(x => x.a === best || x.b === best).length;
-      const fotos = it && it.imgs && it.imgs.length ? it.imgs : best.img ? [best.img] : [];
-      let fi = 0;
-      const im = fotos.length ? h('img', { class: 'am-side-img', src: this.app.vault.getResourcePath(fotos[0]) }) : null, cnt = h('span', { class: 'am-foto-n' }, `1 / ${fotos.length}`);
-      const go = d => { fi = (fi + d + fotos.length) % fotos.length; im.src = this.app.vault.getResourcePath(fotos[fi]); cnt.textContent = `${fi + 1} / ${fotos.length}`; };
-      const pic = !im ? null : fotos.length > 1 ? h('div', { class: 'am-foto am-side-foto' }, im,
-        h('button', { class: 'am-foto-pijl am-foto-prev', 'aria-label': 'vorige foto', onclick: () => go(-1) }, '‹'),
-        h('button', { class: 'am-foto-pijl am-foto-next', 'aria-label': 'volgende foto', onclick: () => go(1) }, '›'), cnt) : h('div', { class: 'am-side-foto' }, im);
-      if (im && fotos.length > 1) { let x0 = null; im.addEventListener('pointerdown', e => { x0 = e.clientX; }); im.addEventListener('pointerup', e => { if (x0 != null && Math.abs(e.clientX - x0) > 40) go(e.clientX < x0 ? 1 : -1); x0 = null; }); }
-      const txt = h('div', { class: 'am-side-txt' });
-      const f = this.app.vault.getAbstractFileByPath(best.it.path);
-      if (f) this.app.vault.cachedRead(f).then(t => { if (sel !== best) return; txt.textContent = t.replace(/^---\r?\n[\s\S]*?\r?\n---[^\n]*\n?/, '').replace(/!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)/g, '').replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, '$2').trim(); });
-      side.replaceChildren(
-        h('button', { class: 'am-side-x', 'aria-label': 'sluiten', onclick: () => pickNode(best) }, '✕'),
-        pic || '',
-        h('div', { class: 'am-side-body' },
-          h('b', { class: 'am-side-title' }, best.it.title),
-          h('div', { class: 'am-side-meta' }, [fmtD(best.it.datum), proj || (best.it.lijnen[0] || ''), best.it.idee ? 'idee' : '', nv ? `${nv} verband${nv === 1 ? '' : 'en'}` : ''].filter(Boolean).join(' · ')),
-          it ? h('button', { class: 'am-menu-btn am-primary am-side-open', onclick: () => {
-            const terug = { ...v }; close(); this.tab = 'archief';
-            // na opslaan (of Terug) weer naar de stroom, op dezelfde plek
-            this.editing = { it, datum: it.datum, lijnen: [...it.lijnen], tags: [...it.tags], producten: [...it.producten], onbekend: [...it.onbekend], stroom: terug };
-            this.render().then(() => { this.contentEl.scrollTop = 0; });
-          } }, 'Openen') : '',
-          txt));
-      side.hidden = false; bar.hidden = true; side.scrollTop = 0;
-      // het item zelf blijft in beeld, links van (of boven) het paneel
-      requestAnimationFrame(() => {
-        const land = side.offsetLeft > 10, fw = land ? side.offsetLeft : W, fh = land ? H : side.offsetTop;
-        const x = v.x + best.X * v.k, y = v.y + best.Y * v.k, nv = { ...v };
-        if (x > fw - 60 || x < 40) nv.x += fw / 2 - x;
-        if (y > fh - 60 || y < 40) nv.y += fh / 2 - y;
-        draw(); if (nv.x !== v.x || nv.y !== v.y) glideTo(nv);
-      });
     };
     requestAnimationFrame(() => { size(); if (keepV) v = keepV; else toEnd(); draw(); if (selPath) { const n = SP.all.find(n => n.it.path === selPath); if (n) pickNode(n); } });
     // lang indrukken op een item: het komt los en je sleept het naar een andere plek (dezelfde regels als Plek kiezen)
