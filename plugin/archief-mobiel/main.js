@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.34.0';
+const BUILD = '0.35.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -2167,13 +2167,12 @@ class ArchiefView extends ItemView {
     for (const e of (it.fc && it.fc.embeds) || []) { const t = mc.getFirstLinkpathDest(e.link.split('|')[0].split('#')[0], it.path); if (t && IMG_EXT.test(t.path)) return t; }
     return null;
   }
-  openStroom(keepV) {
+  openStroom(keepV, selPath) {
     const { items, pages } = this.plugin.stroom(null), M = miniStroom(items, pages);
     if (!M.main.length) return new Notice('Er staan nog geen items in projecten.');
     const byPath = new Map(this.data.items.map(it => [it.file.path, it]));
     const cv = h('canvas'), wrap = h('div', { class: 'am-full-cv' }, cv);
     const info = h('div', { class: 'am-plek-info' }, 'Tik op een item.'), acts = h('div', { class: 'am-plek-acts' });
-    const tip = h('div', { class: 'am-stroom-tip' }, '↻ Draai je telefoon voor meer ruimte');
     const close = () => {
       SP.stop(); root.remove(); window.removeEventListener('resize', onResize);
       try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
@@ -2185,7 +2184,7 @@ class ArchiefView extends ItemView {
         h('span', { class: 'am-plek-title' }, 'Stroom'),
         h('button', { class: 'am-tool', title: 'Alles in beeld', onclick: () => { const o = v; fitAll(); const t = v; v = o; glideTo(t); } }, '⤢'),
         h('button', { class: 'am-tool', title: 'Naar het nieuwste', onclick: () => { const o = v; toEnd(); const t = v; v = o; glideTo(t); } }, '⇥')),
-      wrap, tip, h('div', { class: 'am-plek-bar' }, info, acts));
+      wrap, h('div', { class: 'am-plek-bar' }, info, acts));
     document.body.append(root);
     // liggend als het toestel dat toestaat (alleen op het hele scherm)
     (async () => { try { if (root.requestFullscreen) await root.requestFullscreen({ navigationUI: 'hide' }); if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape'); } catch (e) {} })();
@@ -2193,23 +2192,152 @@ class ArchiefView extends ItemView {
     const soon = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (root.isConnected) draw(); }); };
     const SP = stroomPainter(this.app, M, it => this.stroomImg(it), soon);
     this.plugin.vbSoorten().then(s => { SP.setSoorten(s); soon(); });
-    const size = () => { const r = SDPR(); W = wrap.clientWidth; H = wrap.clientHeight; cv.style.width = W + 'px'; cv.style.height = H + 'px'; cv.width = Math.round(W * r); cv.height = Math.round(H * r); tip.hidden = window.innerWidth > window.innerHeight; };
+    const size = () => { const r = SDPR(); W = wrap.clientWidth; H = wrap.clientHeight; cv.style.width = W + 'px'; cv.style.height = H + 'px'; cv.width = Math.round(W * r); cv.height = Math.round(H * r); };
     const onResize = () => { size(); draw(); };
     window.addEventListener('resize', onResize);
     const KMIN = .03, KMAX = 3;
     const fitAll = () => { const k = Math.max(KMIN, Math.min(1, (W - 40) / (SP.WX + S_COL * 2.4), (H - 50) / (SP.HY + S_ROW))); v = { k, x: (W - SP.WX * k) / 2 + S_COL * .7 * k, y: (H - SP.HY * k) / 2 }; };
     // het nieuwste item rechts in beeld, op de hoogte van zijn eigen rij
     const toEnd = () => { const k = Math.min(.9, Math.max(.45, H / (S_ROW * 2.6))), n = SP.all.reduce((p, q) => q.X > p.X ? q : p, SP.all[0]); v = { k, x: W - 40 - (n.X + S_CH) * k, y: H / 2 - n.Y * k }; };
-    const draw = () => { const pr = SDPR(); g.setTransform(pr, 0, 0, pr, 0, 0); SP.paint(g, v, W, H, { sel }); };
+    const draw = () => {
+      const pr = SDPR(); g.setTransform(pr, 0, 0, pr, 0, 0); SP.paint(g, v, W, H, { sel });
+      // verband leggen: een stippellijn van het item naar je vinger
+      if (sel && link && link.to) {
+        const x0 = v.x + sel.X * v.k, y0 = v.y + sel.Y * v.k, [x1, y1] = link.to, t = SP.hit(v, x1, y1);
+        g.strokeStyle = '#a58cff'; g.lineWidth = 3; g.setLineDash([8, 6]); g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); g.setLineDash([]);
+        g.fillStyle = '#a58cff'; g.beginPath(); g.arc(x1, y1, 6, 0, 7); g.fill();
+        if (t && t !== sel) { const S = t.S * v.k + 10; g.lineWidth = 3; g.strokeRect(v.x + t.X * v.k - S / 2, v.y + t.Y * v.k - S / 2, S, S); }
+      }
+      placeProds();
+    };
     // zacht naar een nieuwe plek glijden (knoppen, item kiezen) in plaats van verspringen
     const glideTo = nv => animV(() => v, x => { v = x; soon(); }, nv);
     // een gekozen item groot in een paneel rechts (staand: onderin, half scherm), met de foto's, tekst en Openen
     const side = h('div', { class: 'am-stroom-side', hidden: true }), bar = root.querySelector('.am-plek-bar');
     wrap.append(side);
-    const unpick = () => { sel = null; side.hidden = true; bar.hidden = false; draw(); };
+    const unpick = () => { sel = null; link = null; prodBox.replaceChildren(); side.hidden = true; bar.hidden = false; info.replaceChildren('Tik op een item.'); acts.replaceChildren(); draw(); };
+    // boven het gekozen item: de producten die erbij horen (of een vraagteken per tag waar nog geen product bij gekozen is)
+    const prodBox = h('div', { class: 'am-sprods', hidden: true }); wrap.append(prodBox);
+    let link = null; // verband leggen: { to: [x, y] } zolang je een lijn trekt
+    const placeProds = () => {
+      if (!sel || !prodBox.childElementCount || link || !side.hidden) { prodBox.hidden = true; return; }
+      prodBox.hidden = false;
+      prodBox.style.transform = `translate(${Math.round(v.x + sel.X * v.k)}px, ${Math.round(v.y + sel.Y * v.k - sel.S * v.k * 1.9 / 2 - 10)}px) translate(-50%, -100%)`;
+    };
+    const lw = s => String(s).toLowerCase();
+    const slotsOf = it => {
+      const P = this.data.products || [], out = [], seen = new Set();
+      for (const t of it.tags) {
+        const ps = P.filter(p => p.tags.includes(t)); if (!ps.length) continue;
+        const mine = ps.filter(p => it.producten.some(x => lw(x) === lw(p.title)));
+        for (const p of mine) if (!seen.has(p)) { seen.add(p); out.push({ tag: t, p }); }
+        if (!mine.length) out.push({ tag: t, p: null, unknown: it.onbekend.includes(t) });
+      }
+      return out;
+    };
+    const showProds = it => {
+      const slots = it ? slotsOf(it) : [];
+      prodBox.replaceChildren(...slots.map((s, i) => h('button', { class: 'am-sprod' + (s.p ? '' : s.unknown ? ' am-sprod-unk' : ' am-sprod-q'), style: `--d:${i * 60}ms`, onclick: () => prodSheet(it, s.tag) },
+        s.p && s.p.img ? h('img', { src: this.app.vault.getResourcePath(s.p.img), alt: '' }) : h('span', { class: 'am-sprod-box' }, s.p ? short(s.p.title, 14) : '?'),
+        h('small', {}, s.p ? short(s.p.title, 14) : s.tag))));
+      prodBox.classList.remove('am-open'); placeProds(); requestAnimationFrame(() => requestAnimationFrame(() => prodBox.classList.add('am-open')));
+    };
+    // een sheet bovenop de stroom: binnen de stroom zelf (die vult soms het hele scherm, dan is de rest onzichtbaar)
+    const topSheet = title => { const M = this.sheet(title), back = M.box.parentElement; back.style.zIndex = 80; root.append(back); return M; };
+    // welk product (meer mag), of 'weet ik niet meer'; meteen bewaard
+    const prodSheet = (it, tag) => {
+      const M = topSheet(`Welk ${tag}? (meer dan één mag)`);
+      const save = async () => {
+        const f = this.app.vault.getAbstractFileByPath(it.file.path); if (!f) return;
+        await this.app.fileManager.processFrontMatter(f, fm => {
+          if (it.producten.length) fm.producten = it.producten.map(t => `[[${t}]]`); else delete fm.producten;
+          if (it.onbekend.length) fm.product_onbekend = it.onbekend; else delete fm.product_onbekend;
+        });
+        this.plugin.sync();
+      };
+      const fill = () => {
+        const has = p => it.producten.some(x => lw(x) === lw(p.title)), unk = it.onbekend.includes(tag);
+        M.set(...(this.data.products || []).filter(p => p.tags.includes(tag)).map(p => h('button', { class: 'am-menu-btn am-sprod-row' + (has(p) ? ' am-on' : ''), onclick: async () => {
+            if (has(p)) it.producten = it.producten.filter(x => lw(x) !== lw(p.title)); else { it.producten = [...it.producten, p.title]; it.onbekend = it.onbekend.filter(x => x !== tag); }
+            fill(); showProds(it); await save();
+          } }, p.img ? h('img', { src: this.app.vault.getResourcePath(p.img), alt: '' }) : h('span', { class: 'am-sprod-ph' }), h('span', {}, (has(p) ? '✓ ' : '') + p.title))),
+          h('button', { class: 'am-menu-btn' + (unk ? ' am-on' : ''), onclick: async () => {
+            if (unk) it.onbekend = it.onbekend.filter(x => x !== tag);
+            else { it.onbekend = [...it.onbekend, tag]; it.producten = it.producten.filter(x => !(this.data.products || []).some(p => p.tags.includes(tag) && lw(p.title) === lw(x))); }
+            fill(); showProds(it); await save();
+          } }, (unk ? '✓ ' : '') + `Weet ik niet meer welk ${tag}`),
+          h('button', { class: 'am-menu-btn am-primary', onclick: () => M.close() }, 'Klaar'));
+      };
+      fill();
+    };
+    // verband: soort kiezen en in de notitie zetten ("[[titel]] | soort", zoals de visualisator)
+    const vbSheet = async (a, b) => {
+      const M = topSheet(`Verband: “${short(a.it.title, 18)}” → “${short(b.it.title, 18)}”`), soorten = await this.plugin.vbSoorten();
+      const has = s => (a.it.verbanden || []).some(x => lw(x.to) === lw(b.it.title) && x.soort === s);
+      const add = async soort => {
+        soort = soort.trim().toLowerCase().replace(/[|\[\]"]/g, ''); if (!soort) return;
+        if (has(soort)) return new Notice('Dat verband bestaat al.');
+        M.close();
+        const f = this.app.vault.getAbstractFileByPath(a.it.path); if (!f) return;
+        try {
+          await this.app.fileManager.processFrontMatter(f, fm => { fm.verbanden = [...arr(fm.verbanden).map(String), `[[${b.it.title}]] | ${soort}`]; });
+          new Notice(`“${short(a.it.title, 20)}” ${soort} “${short(b.it.title, 20)}”`); this.plugin.sync();
+        } catch (e) { console.error(e); return new Notice('Verband leggen lukte niet: ' + (e && e.message || e), 8000); }
+        // even wachten tot Obsidian de notitie opnieuw gelezen heeft; dan de stroom opnieuw, met het item nog gekozen
+        const keep = { ...v }, path = a.it.path;
+        await new Promise(r => setTimeout(r, 700));
+        close(); this.data = await this.plugin.choices(); this.openStroom(keep, path);
+      };
+      const nieuw = this.adder('+ nieuw soort verband', v2 => add(v2));
+      M.set(...soorten.map(sk => h('button', { class: 'am-menu-btn am-vb-row', onclick: () => add(sk.naam) }, h('span', { class: 'am-vb-dot', style: `background:${sk.kleur}` }), (has(sk.naam) ? '✓ ' : '') + sk.naam)),
+        nieuw, h('button', { class: 'am-menu-btn', onclick: () => M.close() }, 'Annuleren'));
+    };
+    const linkMode = () => {
+      link = {}; prodBox.hidden = true;
+      info.replaceChildren(h('b', {}, 'Verband leggen'), ` · tik op het item waar “${short(sel.it.title, 20)}” mee verbonden wordt, of trek een lijn vanaf het item`);
+      acts.replaceChildren(h('button', { class: 'am-menu-btn', onclick: () => pickNode(sel) }, 'Annuleren'));
+      draw();
+    };
+    // tikken op een item: het licht op, de producten springen erboven, onderin de knoppen
+    const pickNode = best => {
+      sel = best; link = null; side.hidden = true; bar.hidden = false;
+      if (!best) return unpick();
+      const it = byPath.get(best.it.path), proj = best.row.side ? '' : best.row.lijn, nv = SP.vbs.filter(x => x.a === best || x.b === best).length;
+      info.replaceChildren(h('b', {}, best.it.title), ' · ' + [fmtD(best.it.datum), proj || (best.it.lijnen[0] || ''), best.it.idee ? 'idee' : '', nv ? `${nv} verband${nv === 1 ? '' : 'en'}` : ''].filter(Boolean).join(' · '));
+      acts.replaceChildren(h('div', { class: 'am-sacts' },
+        it ? h('button', { class: 'am-menu-btn am-primary', onclick: () => {
+          const terug = { ...v }; close(); this.tab = 'archief';
+          // na opslaan (of Terug) weer naar de stroom, op dezelfde plek
+          this.editing = { it, datum: it.datum, lijnen: [...it.lijnen], tags: [...it.tags], producten: [...it.producten], onbekend: [...it.onbekend], stroom: terug };
+          this.render().then(() => { this.contentEl.scrollTop = 0; });
+        } }, 'Bewerken') : null,
+        h('button', { class: 'am-menu-btn', onclick: linkMode }, 'Verband leggen'),
+        h('button', { class: 'am-menu-btn', onclick: () => showSide(best) }, 'Bekijken')));
+      showProds(it);
+      draw();
+      // het item (en de producten erboven) in beeld houden
+      requestAnimationFrame(() => {
+        const x = v.x + best.X * v.k, y = v.y + best.Y * v.k, top = y - best.S * v.k * 1.9 / 2 - (prodBox.childElementCount ? 90 : 10), nv2 = { ...v };
+        if (x > W - 50 || x < 50) nv2.x += W / 2 - x;
+        if (top < 6) nv2.y += 20 - top; else if (y > H - 40) nv2.y += H / 2 - y;
+        if (nv2.x !== v.x || nv2.y !== v.y) glideTo(nv2);
+      });
+    };
     const pick = (px, py) => {
-      const best = SP.hit(v, px, py); sel = best;
-      if (!best) { unpick(); info.replaceChildren('Tik op een item.'); acts.replaceChildren(); return; }
+      const best = SP.hit(v, px, py);
+      if (link) { if (best && best !== sel) { const a = sel; link = null; draw(); vbSheet(a, best); } return; }
+      pickNode(best);
+    };
+    // lijn trekken vanaf het gekozen item (alleen bij Verband leggen)
+    const grabLine = (px, py) => {
+      if (!link || !sel || SP.hit(v, px, py) !== sel) return null;
+      const b0 = cv.getBoundingClientRect();
+      link.to = [px, py]; draw();
+      return { move: (cx, cy) => { link.to = [cx - b0.left, cy - b0.top]; soon(); },
+        end: () => { const [x, y] = link.to || [0, 0], t = SP.hit(v, x, y), a = sel; link.to = null; draw(); if (t && t !== a) { link = null; draw(); vbSheet(a, t); } } };
+    };
+    // de foto groot met de tekst (zoals eerst bij tikken)
+    const showSide = best => {
       const it = byPath.get(best.it.path), proj = best.row.side ? '' : best.row.lijn;
       const nv = SP.vbs.filter(x => x.a === best || x.b === best).length;
       const fotos = it && it.imgs && it.imgs.length ? it.imgs : best.img ? [best.img] : [];
@@ -2224,7 +2352,7 @@ class ArchiefView extends ItemView {
       const f = this.app.vault.getAbstractFileByPath(best.it.path);
       if (f) this.app.vault.cachedRead(f).then(t => { if (sel !== best) return; txt.textContent = t.replace(/^---\r?\n[\s\S]*?\r?\n---[^\n]*\n?/, '').replace(/!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)/g, '').replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, '$2').trim(); });
       side.replaceChildren(
-        h('button', { class: 'am-side-x', 'aria-label': 'sluiten', onclick: unpick }, '✕'),
+        h('button', { class: 'am-side-x', 'aria-label': 'sluiten', onclick: () => pickNode(best) }, '✕'),
         pic || '',
         h('div', { class: 'am-side-body' },
           h('b', { class: 'am-side-title' }, best.it.title),
@@ -2246,7 +2374,7 @@ class ArchiefView extends ItemView {
         draw(); if (nv.x !== v.x || nv.y !== v.y) glideTo(nv);
       });
     };
-    requestAnimationFrame(() => { size(); if (keepV) v = keepV; else toEnd(); draw(); });
+    requestAnimationFrame(() => { size(); if (keepV) v = keepV; else toEnd(); draw(); if (selPath) { const n = SP.all.find(n => n.it.path === selPath); if (n) pickNode(n); } });
     // lang indrukken op een item: het komt los en je sleept het naar een andere plek (dezelfde regels als Plek kiezen)
     const grab = (px, py, cx, cy) => {
       const n = SP.hit(v, px, py); if (!n) return null;
@@ -2274,11 +2402,12 @@ class ArchiefView extends ItemView {
         close(); this.data = await this.plugin.choices(); this.openStroom(keep);
       }, { cx, cy, v: { ...v }, title: n.it.title, parent: root, idee: n.it.idee, img: n.img ? this.app.vault.getResourcePath(n.img) : '' });
     };
-    this.panZoom(cv, () => v, nv => { v = nv; soon(); }, pick, KMIN, KMAX, grab);
+    this.panZoom(cv, () => v, nv => { v = nv; soon(); }, pick, KMIN, KMAX, (px, py, cx, cy) => link ? null : grab(px, py, cx, cy), grabLine);
   }
   // schuiven met één vinger, zoomen met twee (of het muiswiel); een tik zonder schuiven gaat naar onTap
   // onLong (mag weg): lang indrukken zonder te schuiven; geeft het { move, end } terug, dan krijgt dat de rest van het gebaar
-  panZoom(cv, getV, setV, onTap, KMIN, KMAX, onLong) {
+  // onGrab (mag weg): bij neerzetten; geeft het { move, end } terug, dan krijgt dat meteen het hele gebaar (bijv. een lijn trekken)
+  panZoom(cv, getV, setV, onTap, KMIN, KMAX, onLong, onGrab) {
     const P = new Map(); let G = null, last = null, moved = false, lt = 0, LH = null, vel = [], pinched = false;
     const sp = e => { const b = cv.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
     // na loslaten glijdt de stroom nog even door en remt af (zoals een gewone lijst op de telefoon)
@@ -2305,6 +2434,7 @@ class ArchiefView extends ItemView {
       if (!P.size) { vel = []; pinched = false; }
       e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch (err) {}
       P.set(e.pointerId, sp(e)); last = sp(e); moved = false; clearTimeout(lt);
+      if (P.size === 1 && onGrab) { const q = sp(e), hnd = onGrab(q[0], q[1]); if (hnd) { LH = hnd; moved = true; return; } }
       if (P.size === 1 && onLong) { const p0 = sp(e), cx = e.clientX, cy = e.clientY; lt = setTimeout(() => { if (moved || P.size !== 1) return; LH = onLong(p0[0], p0[1], cx, cy); if (LH && navigator.vibrate) navigator.vibrate(25); }, 450); }
       if (P.size === 2) { const [a, b] = [...P.values()]; G = { d0: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, m0: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], v: { ...getV() } }; moved = true; pinched = true; }
     });
