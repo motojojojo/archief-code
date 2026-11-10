@@ -191,6 +191,8 @@ body.am-actief .mobile-navbar { display: none !important; }
 .am-plek-line span { flex: 1; min-width: 0; }
 .am-plek-x { width: 30px; height: 30px; padding: 0; flex: 0 0 30px; }
 .am-plek-title { flex: 4 1 auto; text-align: center; font-size: 14px; color: var(--text-muted); }
+.am-plek-new { flex: 0 0 auto; height: 34px; padding: 0 10px; border-radius: 17px; font-size: 13px; white-space: nowrap; background: var(--interactive-accent); color: var(--text-on-accent); }
+.am-plek-newname { width: 100%; font-size: 16px; }
 .am-plek-cv { touch-action: none; background: #0a0a0a; }
 .am-plek-cv canvas { display: block; touch-action: none; }
 .am-pin { position: absolute; left: 0; top: 0; z-index: 2; transform: translate(-50%, calc(-100% - 8px)); padding: 7px 12px; border-radius: 10px; background: #7c5cd6; color: #fff; font-weight: 700; font-size: 13px; letter-spacing: .04em; box-shadow: 0 3px 10px rgba(0,0,0,.3); touch-action: none; -webkit-user-select: none; user-select: none; cursor: grab; }
