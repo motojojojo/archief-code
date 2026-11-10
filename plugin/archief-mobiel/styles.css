@@ -336,3 +336,8 @@ body.am-actief .mobile-navbar { display: none !important; }
 .am-sprod-row img, .am-sprod-ph { width: 36px; height: 36px; flex: 0 0 36px; border-radius: 6px; object-fit: cover; background: var(--background-modifier-border); }
 .am-vb-row { display: flex; align-items: center; gap: 10px; text-align: left; }
 .am-vb-dot { width: 14px; height: 14px; flex: 0 0 14px; border-radius: 50%; }
+/* stroom: titels aan/uit */
+.am-tchip { flex: 0 0 auto; height: 34px; padding: 0 10px; border-radius: 17px; font-size: 13px; white-space: nowrap; opacity: .55; text-decoration: line-through; }
+.am-tchip.am-on { opacity: 1; text-decoration: none; background: var(--interactive-accent); color: var(--text-on-accent); }
+.am-stroom .am-plek-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (orientation: portrait) { .am-stroom .am-plek-title { display: none; } }
