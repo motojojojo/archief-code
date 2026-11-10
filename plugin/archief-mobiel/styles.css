@@ -341,3 +341,7 @@ body.am-actief .mobile-navbar { display: none !important; }
 .am-tchip.am-on { opacity: 1; text-decoration: none; background: var(--interactive-accent); color: var(--text-on-accent); }
 .am-stroom .am-plek-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (orientation: portrait) { .am-stroom .am-plek-title { display: none; } }
+/* het gekozen item in de stroom: de echte foto, scherp */
+.am-selimg { position: absolute; left: 0; top: 0; z-index: 1; object-fit: cover; pointer-events: none; will-change: transform; transform-origin: 0 0; }
+.am-selimg[hidden] { display: none; }
+.am-selimg.am-selimg-rond { border-radius: 50%; }
