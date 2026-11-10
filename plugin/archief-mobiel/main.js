@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.33.0';
+const BUILD = '0.34.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -657,6 +657,24 @@ function placeVbLabels(list) {
   });
 }
 
+// de stroom hoeft niet scherper dan 2x: op een iPhone (3x) scheelt dat ruim de helft van het tekenwerk
+const SDPR = () => Math.min(2, window.devicePixelRatio || 1);
+// het beeld van a naar b laten glijden (afremmend); een nieuwe beweging of aanraking stopt de vorige
+function animV(get, set, to, ms = 380) {
+  const from = { ...get() }, t0 = performance.now(), id = (animV.id = (animV.id || 0) + 1);
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  // zoomen gaat op een log-schaal, dan voelt het gelijkmatig
+  const step = now => {
+    if (animV.id !== id) return;
+    const t = Math.min(1, (now - t0) / ms), e = ease(t), k = Math.exp(Math.log(from.k) + (Math.log(to.k) - Math.log(from.k)) * e);
+    // het punt in het midden van de beweging blijft netjes op zijn baan: x/y lopen mee met de zoom
+    const f = (from.k === to.k) ? e : (k - from.k) / (to.k - from.k);
+    set({ k, x: from.x + (to.x - from.x) * f, y: from.y + (to.y - from.y) * f });
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+animV.stop = () => { animV.id = (animV.id || 0) + 1; };
 function stroomPainter(app, M, imgOf, onPic, opt = {}) {
   const low = s => String(s).toLowerCase();
   const all = M.rows.flatMap(r => [...r.nodes, ...r.extra]);
@@ -746,7 +764,7 @@ function stroomPainter(app, M, imgOf, onPic, opt = {}) {
     return lit = { ys, ring, bron, me };
   };
   // plaatjes: alleen wat in beeld is laden, en verkleind bewaren zodat tekenen snel blijft
-  const pics = new Map(); let loading = 0, need = [], dead = false;
+  const pics = new Map(), widths = new Map(); let loading = 0, need = [], dead = false;
   const pump = () => {
     while (loading < 4 && need.length) {
       const f = need.shift(); if (pics.has(f.path)) continue;
@@ -756,7 +774,11 @@ function stroomPainter(app, M, imgOf, onPic, opt = {}) {
         if (ok && im.naturalWidth) {
           const c = document.createElement('canvas'), q = 160, s0 = Math.min(im.naturalWidth, im.naturalHeight);
           c.width = c.height = q; c.getContext('2d').drawImage(im, (im.naturalWidth - s0) / 2, (im.naturalHeight - s0) / 2, s0, s0, 0, 0, q, q);
-          pics.set(f.path, c);
+          // ook een ronde versie (voor ideeën), dan hoeft er bij het tekenen niet geknipt te worden
+          const o = document.createElement('canvas'); o.width = o.height = q; const og = o.getContext('2d');
+          og.fillStyle = '#f4f1ea'; og.beginPath(); og.arc(q / 2, q / 2, q / 2, 0, 7); og.fill(); og.clip(); og.drawImage(c, 0, 0);
+          const e = { sq: c, rd: o }; pics.set(f.path, e);
+          if (window.createImageBitmap) Promise.all([createImageBitmap(c), createImageBitmap(o)]).then(([a, b]) => { e.sq = a; e.rd = b; }).catch(() => {});
         } else pics.set(f.path, false);
         if (!dead) { onPic(); pump(); }
       };
@@ -835,12 +857,14 @@ function stroomPainter(app, M, imgOf, onPic, opt = {}) {
       g.globalAlpha = L && !ringed ? DIM : 1;
       let pic = n.img ? pics.get(n.img.path) : false;
       if (pic === undefined) { if (S > 5) need.push(n.img); pic = null; }
+      if (pic && n !== o.sel) g.drawImage(idee ? pic.rd : pic.sq, x, y, S, S); // snel: zonder knippen
+      else {
       if (n === o.sel) { g.shadowColor = 'rgba(0,0,0,.7)'; g.shadowBlur = 14; g.shadowOffsetY = 4; }
       g.save(); g.beginPath();
       if (idee) g.arc(x + S / 2, y + S / 2, S / 2, 0, 7); else g.rect(x, y, S, S);
       g.fillStyle = idee ? '#f4f1ea' : '#1a1a1a'; g.fill(); g.shadowColor = 'transparent'; g.shadowBlur = 0; g.shadowOffsetY = 0;
       g.clip();
-      if (pic) g.drawImage(pic, x, y, S, S);
+      if (pic) g.drawImage(pic.sq, x, y, S, S);
       else {
         if (!idee) { g.fillStyle = c; g.fillRect(x, y, S, Math.max(1, 3 * k)); }
         if (S > 34 && !n.img) {
@@ -854,6 +878,7 @@ function stroomPainter(app, M, imgOf, onPic, opt = {}) {
         }
       }
       g.restore();
+      }
       const on = n === o.sel || ringed;
       g.strokeStyle = on ? c : S_SOFT; g.lineWidth = on ? 2.5 : 1; g.beginPath();
       if (idee) g.arc(x + S / 2, y + S / 2, S / 2, 0, 7); else g.rect(x + .5, y + .5, S - 1, S - 1);
@@ -876,7 +901,8 @@ function stroomPainter(app, M, imgOf, onPic, opt = {}) {
         if ((n.it.idee ? k < .28 : k < .55) && n !== o.sel) continue;
         if (!vis(n)) continue;
         const x = sx(n.X); g.font = n.it.idee ? `600 11px ${S_MONO}` : `10px ${S_MONO}`;
-        const t = short(n.it.title, n.it.idee ? 22 : Math.max(8, Math.round(S_COL * k / 7))), w = g.measureText(t).width;
+        const t = short(n.it.title, n.it.idee ? 22 : Math.max(8, Math.round(S_COL * k / 7))), wk = g.font + '|' + t;
+        let w = widths.get(wk); if (w === undefined) { w = g.measureText(t).width; widths.set(wk, w); }
         if (x - w / 2 < right + 6 && n !== o.sel) continue; right = x + w / 2;
         g.globalAlpha = L && !L.ring.has(n.it) ? DIM : 1;
         g.fillStyle = n.it.idee ? S_INK : S_MUTED; g.fillText(t, x, sy(n.Y) + n.S * k * scaleOf(n) / 2 + (n.it.idee ? 8 : 5));
@@ -1977,7 +2003,7 @@ class ArchiefView extends ItemView {
     const soon = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (root.isConnected) draw(); }); };
     // dezelfde tekening als de stroom zelf (en de visualisator)
     const SP = stroomPainter(this.app, M, it => this.stroomImg(it), soon, { vb: false });
-    const size = () => { const r = window.devicePixelRatio || 1; W = wrap.clientWidth; H = wrap.clientHeight; cv.style.width = W + 'px'; cv.style.height = H + 'px'; cv.width = Math.round(W * r); cv.height = Math.round(H * r); };
+    const size = () => { const r = SDPR(); W = wrap.clientWidth; H = wrap.clientHeight; cv.style.width = W + 'px'; cv.style.height = H + 'px'; cv.width = Math.round(W * r); cv.height = Math.round(H * r); };
     const onResize = () => { size(); draw(); };
     window.addEventListener('resize', onResize);
     // de plek wordt in de maten van miniStroom bepaald; op het scherm in die van de visualisator, in beide richtingen even groot
@@ -2035,7 +2061,7 @@ class ArchiefView extends ItemView {
     let mk = { x: T.gx, y: T.gy ?? T.r.y };
     const rr = (x, y, w, hh, rad) => { g.beginPath(); g.moveTo(x + rad, y); g.arcTo(x + w, y, x + w, y + hh, rad); g.arcTo(x + w, y + hh, x, y + hh, rad); g.arcTo(x, y + hh, x, y, rad); g.arcTo(x, y, x + w, y, rad); g.closePath(); };
     const draw = () => {
-      const pr = window.devicePixelRatio || 1;
+      const pr = SDPR();
       g.setTransform(pr, 0, 0, pr, 0, 0); SP.paint(g, v, W, H, { hot: T && T.r });
       // waar hij komt: paars streepje in de rij
       if (T && T.att) {
@@ -2049,6 +2075,7 @@ class ArchiefView extends ItemView {
     const btn = (label, fn, cls = '') => h('button', { class: 'am-menu-btn ' + cls, onclick: fn }, label);
     // de regels: past de datum tussen de buren? anders kiezen
     const describe = () => {
+      lastKey = keyOf(T); if (newBox) { newBox.remove(); newBox = null; }
       const d = C.get();
       if (T.side) {
         const an = T.anchor.it, lo2 = an.datum, root = rootOf(T.r);
@@ -2083,6 +2110,10 @@ class ArchiefView extends ItemView {
       if (!sel.some(l => low(l) === low(r.lijn))) { if (sel.length <= 1) sel.splice(0, sel.length, r.lijn); else sel.push(r.lijn); }
       C.set(d); close(); rerender();
     };
+    // de knoppen onder alleen opnieuw maken als de plek verandert (niet bij elke beweging van je vinger)
+    let lastKey = null, newBox = null;
+    const keyOf = t => t ? [t.r.lijn, t.r.y, t.a && t.a.it.path, t.b && t.b.it.path, t.att, t.kant, t.anchor && t.anchor.it.path].join('|') : '';
+    const describeSoon = () => { const k = keyOf(T); if (k !== lastKey) { lastKey = k; describe(); } };
     // in een nieuw project: het item begint een eigen rij (bestaat de naam al, dan in dat project op zijn plek in de tijd)
     const askNew = () => {
       const inp = h('input', { type: 'text', class: 'am-add am-plek-newname', placeholder: 'Naam van het nieuwe project', enterkeyhint: 'done' });
@@ -2096,8 +2127,11 @@ class ArchiefView extends ItemView {
         C.set(d); close(); rerender();
       };
       inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
-      info.replaceChildren(h('b', {}, 'Nieuw project'), ' · het item komt in een eigen, nieuwe rij');
-      acts.replaceChildren(inp, btn('In nieuw project zetten', go, 'am-primary'), btn('Terug', () => describe()));
+      // bovenin het scherm, zodat het toetsenbord er niet overheen valt
+      if (newBox) newBox.remove();
+      newBox = h('div', { class: 'am-plek-newbox' }, h('div', { class: 'am-plek-info' }, h('b', {}, 'Nieuw project'), ' · het item komt in een eigen, nieuwe rij'), inp,
+        h('div', { class: 'am-plek-newbtns' }, btn('Terug', () => { newBox.remove(); newBox = null; }), btn('Maken', go, 'am-primary')));
+      wrap.append(newBox);
       setTimeout(() => inp.focus(), 50);
     };
     // de pin slepen; vlak bij de rand schuift de stroom mee
@@ -2111,7 +2145,7 @@ class ArchiefView extends ItemView {
       if (!grab) return; const b = wrap.getBoundingClientRect(), px = cx - b.left, py = cy - b.top;
       if (px < 36) v.x += 10; else if (px > W - 36) v.x -= 10;
       if (py - grab[1] < 36) v.y += 8; else if (py > H - 20) v.y -= 8;
-      const [wx, wy] = toW(px - grab[0], py - grab[1]); mk = { x: wx, y: wy }; T = target(wx, wy); draw(); describe();
+      const [wx, wy] = toW(px - grab[0], py - grab[1]); mk = { x: wx, y: wy }; T = target(wx, wy); soon(); describeSoon();
     };
     const drop = () => { if (!grab) return; grab = null; pin.classList.remove('am-pin-drag'); mk = { x: T.gx, y: T.gy ?? T.r.y }; draw(); describe(); };
     if (drag) { size(); v = { ...drag.v }; grabAt(drag.cx, drag.cy); }
@@ -2149,8 +2183,8 @@ class ArchiefView extends ItemView {
       h('div', { class: 'am-full-bar' },
         h('button', { class: 'am-tool am-close', title: 'Sluiten', onclick: close }, '✕'),
         h('span', { class: 'am-plek-title' }, 'Stroom'),
-        h('button', { class: 'am-tool', title: 'Alles in beeld', onclick: () => { fitAll(); draw(); } }, '⤢'),
-        h('button', { class: 'am-tool', title: 'Naar het nieuwste', onclick: () => { toEnd(); draw(); } }, '⇥')),
+        h('button', { class: 'am-tool', title: 'Alles in beeld', onclick: () => { const o = v; fitAll(); const t = v; v = o; glideTo(t); } }, '⤢'),
+        h('button', { class: 'am-tool', title: 'Naar het nieuwste', onclick: () => { const o = v; toEnd(); const t = v; v = o; glideTo(t); } }, '⇥')),
       wrap, tip, h('div', { class: 'am-plek-bar' }, info, acts));
     document.body.append(root);
     // liggend als het toestel dat toestaat (alleen op het hele scherm)
@@ -2159,14 +2193,16 @@ class ArchiefView extends ItemView {
     const soon = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (root.isConnected) draw(); }); };
     const SP = stroomPainter(this.app, M, it => this.stroomImg(it), soon);
     this.plugin.vbSoorten().then(s => { SP.setSoorten(s); soon(); });
-    const size = () => { const r = window.devicePixelRatio || 1; W = wrap.clientWidth; H = wrap.clientHeight; cv.style.width = W + 'px'; cv.style.height = H + 'px'; cv.width = Math.round(W * r); cv.height = Math.round(H * r); tip.hidden = window.innerWidth > window.innerHeight; };
+    const size = () => { const r = SDPR(); W = wrap.clientWidth; H = wrap.clientHeight; cv.style.width = W + 'px'; cv.style.height = H + 'px'; cv.width = Math.round(W * r); cv.height = Math.round(H * r); tip.hidden = window.innerWidth > window.innerHeight; };
     const onResize = () => { size(); draw(); };
     window.addEventListener('resize', onResize);
     const KMIN = .03, KMAX = 3;
     const fitAll = () => { const k = Math.max(KMIN, Math.min(1, (W - 40) / (SP.WX + S_COL * 2.4), (H - 50) / (SP.HY + S_ROW))); v = { k, x: (W - SP.WX * k) / 2 + S_COL * .7 * k, y: (H - SP.HY * k) / 2 }; };
     // het nieuwste item rechts in beeld, op de hoogte van zijn eigen rij
     const toEnd = () => { const k = Math.min(.9, Math.max(.45, H / (S_ROW * 2.6))), n = SP.all.reduce((p, q) => q.X > p.X ? q : p, SP.all[0]); v = { k, x: W - 40 - (n.X + S_CH) * k, y: H / 2 - n.Y * k }; };
-    const draw = () => { const pr = window.devicePixelRatio || 1; g.setTransform(pr, 0, 0, pr, 0, 0); SP.paint(g, v, W, H, { sel }); };
+    const draw = () => { const pr = SDPR(); g.setTransform(pr, 0, 0, pr, 0, 0); SP.paint(g, v, W, H, { sel }); };
+    // zacht naar een nieuwe plek glijden (knoppen, item kiezen) in plaats van verspringen
+    const glideTo = nv => animV(() => v, x => { v = x; soon(); }, nv);
     // een gekozen item groot in een paneel rechts (staand: onderin, half scherm), met de foto's, tekst en Openen
     const side = h('div', { class: 'am-stroom-side', hidden: true }), bar = root.querySelector('.am-plek-bar');
     wrap.append(side);
@@ -2204,10 +2240,10 @@ class ArchiefView extends ItemView {
       // het item zelf blijft in beeld, links van (of boven) het paneel
       requestAnimationFrame(() => {
         const land = side.offsetLeft > 10, fw = land ? side.offsetLeft : W, fh = land ? H : side.offsetTop;
-        const x = v.x + best.X * v.k, y = v.y + best.Y * v.k;
-        if (x > fw - 60 || x < 40) v.x += fw / 2 - x;
-        if (y > fh - 60 || y < 40) v.y += fh / 2 - y;
-        draw();
+        const x = v.x + best.X * v.k, y = v.y + best.Y * v.k, nv = { ...v };
+        if (x > fw - 60 || x < 40) nv.x += fw / 2 - x;
+        if (y > fh - 60 || y < 40) nv.y += fh / 2 - y;
+        draw(); if (nv.x !== v.x || nv.y !== v.y) glideTo(nv);
       });
     };
     requestAnimationFrame(() => { size(); if (keepV) v = keepV; else toEnd(); draw(); });
@@ -2243,13 +2279,34 @@ class ArchiefView extends ItemView {
   // schuiven met één vinger, zoomen met twee (of het muiswiel); een tik zonder schuiven gaat naar onTap
   // onLong (mag weg): lang indrukken zonder te schuiven; geeft het { move, end } terug, dan krijgt dat de rest van het gebaar
   panZoom(cv, getV, setV, onTap, KMIN, KMAX, onLong) {
-    const P = new Map(); let G = null, last = null, moved = false, lt = 0, LH = null;
+    const P = new Map(); let G = null, last = null, moved = false, lt = 0, LH = null, vel = [], pinched = false;
     const sp = e => { const b = cv.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
+    // na loslaten glijdt de stroom nog even door en remt af (zoals een gewone lijst op de telefoon)
+    let glide = 0;
+    const fling = () => {
+      const now = performance.now(), rec = vel.filter(q => now - q[0] < 90); vel = [];
+      if (rec.length < 2) return;
+      const a = rec[0], b = rec[rec.length - 1], dt = Math.max(8, b[0] - a[0]);
+      let vx = (b[1] - a[1]) / dt, vy = (b[2] - a[2]) / dt; // pixels per ms
+      if (Math.hypot(vx, vy) < .15) return;
+      const lim = 4; vx = Math.max(-lim, Math.min(lim, vx)); vy = Math.max(-lim, Math.min(lim, vy));
+      let t = performance.now(); const id = ++glide;
+      const step = now => {
+        if (id !== glide) return;
+        const dt2 = Math.min(40, now - t); t = now;
+        const v = getV(); setV({ k: v.k, x: v.x + vx * dt2, y: v.y + vy * dt2 });
+        const f = Math.pow(.9965, dt2); vx *= f; vy *= f; // afremmen
+        if (Math.hypot(vx, vy) > .02) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    };
     cv.addEventListener('pointerdown', e => {
+      glide++; animV.stop(); // een aanraking houdt een glijdende beweging meteen tegen
+      if (!P.size) { vel = []; pinched = false; }
       e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch (err) {}
       P.set(e.pointerId, sp(e)); last = sp(e); moved = false; clearTimeout(lt);
       if (P.size === 1 && onLong) { const p0 = sp(e), cx = e.clientX, cy = e.clientY; lt = setTimeout(() => { if (moved || P.size !== 1) return; LH = onLong(p0[0], p0[1], cx, cy); if (LH && navigator.vibrate) navigator.vibrate(25); }, 450); }
-      if (P.size === 2) { const [a, b] = [...P.values()]; G = { d0: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, m0: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], v: { ...getV() } }; moved = true; }
+      if (P.size === 2) { const [a, b] = [...P.values()]; G = { d0: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, m0: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], v: { ...getV() } }; moved = true; pinched = true; }
     });
     cv.addEventListener('pointermove', e => {
       if (LH) { LH.move(e.clientX, e.clientY); return; }
@@ -2260,14 +2317,15 @@ class ArchiefView extends ItemView {
         setV({ k, x: m[0] - wx * k, y: m[1] - wy * k });
       } else if (P.size === 1) {
         if (Math.hypot(p[0] - last[0], p[1] - last[1]) > 6) moved = true;
-        if (moved) { const v = getV(); setV({ k: v.k, x: v.x + p[0] - last[0], y: v.y + p[1] - last[1] }); last = p; }
+        if (moved) { const v = getV(); setV({ k: v.k, x: v.x + p[0] - last[0], y: v.y + p[1] - last[1] }); last = p; vel.push([performance.now(), p[0], p[1]]); if (vel.length > 12) vel.shift(); }
       }
     });
     const end = e => {
       const p = P.get(e.pointerId); P.delete(e.pointerId); clearTimeout(lt);
       if (LH) { const l = LH; LH = null; if (!P.size) l.end(); return; }
       if (!P.size && !moved && p) onTap(...p);
-      if (P.size < 2) G = null; if (P.size === 1) { last = [...P.values()][0]; }
+      if (!P.size && moved && !pinched) fling();
+      if (P.size < 2) G = null; if (P.size === 1) { last = [...P.values()][0]; vel = []; }
     };
     cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
     cv.addEventListener('wheel', e => { e.preventDefault(); const v = getV(), [mx, my] = sp(e), wx = (mx - v.x) / v.k, wy = (my - v.y) / v.k, k = Math.min(KMAX, Math.max(KMIN, v.k * Math.exp(-e.deltaY / 400))); setV({ k, x: mx - wx * k, y: my - wy * k }); }, { passive: false });
