@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.32.0';
+const BUILD = '0.33.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -1947,7 +1947,7 @@ class ArchiefView extends ItemView {
   // de gekozen plek in de stroom, als regel onder de projecten (× haalt hem weg)
   plekLine(C, rerender) {
     const p = C.holder.plek; if (!p) return null;
-    const where = p.hang ? (p.hang.kant === 'rechts' ? `zijtak, rechts naast “${short(p.hang.aan)}”` : `zijtak, ${p.hang.kant} “${short(p.hang.aan)}”`) : p.a && p.b ? `tussen “${short(p.a.title)}” en “${short(p.b.title)}”` : p.a ? `na “${short(p.a.title)}”` : p.b ? `vóór “${short(p.b.title)}”` : 'op zijn plek in de tijd';
+    const where = p.nieuw ? 'nieuw project' : p.hang ? (p.hang.kant === 'rechts' ? `zijtak, rechts naast “${short(p.hang.aan)}”` : `zijtak, ${p.hang.kant} “${short(p.hang.aan)}”`) : p.a && p.b ? `tussen “${short(p.a.title)}” en “${short(p.b.title)}”` : p.a ? `na “${short(p.a.title)}”` : p.b ? `vóór “${short(p.b.title)}”` : 'op zijn plek in de tijd';
     return h('div', { class: 'am-plek-line' }, h('span', {}, `📍 ${p.lijn} · ${where} · ${fmtD(p.datum)}`),
       h('button', { class: 'am-plek-x', 'aria-label': 'plek weghalen', onclick: () => { C.holder.plek = null; rerender(); } }, '×'));
   }
@@ -1969,6 +1969,7 @@ class ArchiefView extends ItemView {
       h('div', { class: 'am-full-bar' },
         h('button', { class: 'am-tool am-close', title: 'Sluiten', onclick: close }, '✕'),
         h('span', { class: 'am-plek-title' }, drag ? `“${short(drag.title, 26)}” verplaatsen` : 'Sleep HIER naar de plek'),
+        h('button', { class: 'am-plek-new', onclick: () => askNew() }, '+ Nieuw project'),
         h('button', { class: 'am-tool', title: 'Alles in beeld', onclick: () => { fitAll(); draw(); } }, '⤢')),
       wrap, h('div', { class: 'am-plek-bar' }, info, acts));
     (drag && drag.parent || document.body).append(root); // binnen de stroom als die het hele scherm vult
@@ -2081,6 +2082,23 @@ class ArchiefView extends ItemView {
       C.holder.plek = { lijn: r.lijn, datum: d, a: exact && a ? { title: a.it.title } : null, b: exact && b ? { title: b.it.title } : null, day };
       if (!sel.some(l => low(l) === low(r.lijn))) { if (sel.length <= 1) sel.splice(0, sel.length, r.lijn); else sel.push(r.lijn); }
       C.set(d); close(); rerender();
+    };
+    // in een nieuw project: het item begint een eigen rij (bestaat de naam al, dan in dat project op zijn plek in de tijd)
+    const askNew = () => {
+      const inp = h('input', { type: 'text', class: 'am-add am-plek-newname', placeholder: 'Naam van het nieuwe project', enterkeyhint: 'done' });
+      const go = () => {
+        let name = inp.value.trim(); if (!name) return inp.focus();
+        const old = M.main.find(q => low(q.lijn) === low(name)) || { lijn: (this.data.lijnen || []).find(l => low(l) === low(name)) };
+        if (old.lijn) name = old.lijn;
+        const d = C.get() || isoDay(Date.now());
+        C.holder.plek = { lijn: name, datum: d, a: null, b: null, day: null, nieuw: !old.lijn };
+        if (sel.length <= 1) sel.splice(0, sel.length, name); else if (!sel.some(l => low(l) === low(name))) sel.push(name);
+        C.set(d); close(); rerender();
+      };
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+      info.replaceChildren(h('b', {}, 'Nieuw project'), ' · het item komt in een eigen, nieuwe rij');
+      acts.replaceChildren(inp, btn('In nieuw project zetten', go, 'am-primary'), btn('Terug', () => describe()));
+      setTimeout(() => inp.focus(), 50);
     };
     // de pin slepen; vlak bij de rand schuift de stroom mee
     let grab = null;
