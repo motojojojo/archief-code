@@ -315,3 +315,8 @@ body.am-actief .mobile-navbar { display: none !important; }
 .am-full.am-enter-done .am-full-extra { box-shadow: 0 6px 18px rgba(0,0,0,0); transition: box-shadow .2s ease; }
 .am-full.am-notrans, .am-full.am-notrans * { transition: none !important; }
 .am-full.am-enter-start .am-enter-bot { transform: translateY(100%); }
+/* nieuw project: het invulvak bovenin (het toetsenbord valt anders over de onderbalk) */
+.am-plek-newbox { position: absolute; left: 8px; right: 8px; top: 8px; z-index: 5; display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 12px; background: var(--background-primary); box-shadow: 0 8px 28px rgba(0,0,0,.45); }
+.am-plek-newbtns { display: flex; gap: 8px; }
+.am-plek-newbtns .am-menu-btn { flex: 1; }
+@media (orientation: landscape) { .am-plek-newbox { left: 50%; right: auto; width: min(460px, 90vw); transform: translateX(-50%); } }
