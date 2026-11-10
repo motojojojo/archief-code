@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.35.0';
+const BUILD = '0.36.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -680,6 +680,9 @@ function stroomPainter(app, M, imgOf, onPic, opt = {}) {
   const all = M.rows.flatMap(r => [...r.nodes, ...r.extra]);
   all.forEach((n, i) => { n.id = i; n.X = n.x * S_FX; n.Y = n.y * S_FY; n.S = n.it.idee ? (S_RANG[n.it.rang] || S_CARD) : S_CARD; n.img = imgOf(n.it); });
   const rowsD = M.rows.map(r => ({ r, ns: [...r.nodes, ...r.extra].sort((p, q) => p.X - q.X) })).filter(o => o.ns.length);
+  // een idee loopt door tot het laatste wat (via 'aan', ook verder doorgehangen) aan hem hangt: zover schuift zijn titel mee
+  for (const n of all) n.tail = n.X;
+  for (const m of all) for (let a = m.a, k = 0; a && k < 50; a = a.a, k++) if (a.it.idee && m.X > a.tail) a.tail = m.X;
   const WX = Math.max(...all.map(n => n.X)), HY = Math.max(...all.map(n => n.Y));
   // verbanden: van een item naar het item waar het naar wijst (pijl aan die kant); elk item telt één keer, op zijn eigen plek
   const first = new Map(); for (const n of all) { const k = low(n.it.title); if (!first.has(k) || low(n.it.lijnen[0] || '') === low(n.row.lijn)) first.set(k, n); }
@@ -898,14 +901,21 @@ function stroomPainter(app, M, imgOf, onPic, opt = {}) {
     for (const { ns } of rowsD) {
       let right = -1e9;
       for (const n of ns) {
-        if ((n.it.idee ? k < .28 : k < .55) && n !== o.sel) continue;
-        if (!vis(n)) continue;
-        const x = sx(n.X); g.font = n.it.idee ? `600 11px ${S_MONO}` : `10px ${S_MONO}`;
+        if ((n.it.idee ? k < .28 || o.ideeT === false : k < .55) && n !== o.sel) continue;
+        // een idee met iets eraan: zijn titel blijft aan de linkerrand staan zolang dat in beeld is (zoals de projectnamen)
+        const stick = n.it.idee && n.tail > n.X && n !== o.sel;
+        if (stick ? !(sy(n.Y) > -40 && sy(n.Y) < H + 40 && sx(n.tail) > 0 && sx(n.X) < W + 60) : !vis(n)) continue;
+        let x = sx(n.X); g.font = n.it.idee ? `600 11px ${S_MONO}` : `10px ${S_MONO}`;
         const t = short(n.it.title, n.it.idee ? 22 : Math.max(8, Math.round(S_COL * k / 7))), wk = g.font + '|' + t;
         let w = widths.get(wk); if (w === undefined) { w = g.measureText(t).width; widths.set(wk, w); }
+        let stuck = false;
+        if (stick && x - w / 2 < 6) { x = Math.min(6 + w / 2, Math.max(x, sx(n.tail) + n.S * k / 2 - w / 2)); stuck = true; }
         if (x - w / 2 < right + 6 && n !== o.sel) continue; right = x + w / 2;
         g.globalAlpha = L && !L.ring.has(n.it) ? DIM : 1;
-        g.fillStyle = n.it.idee ? S_INK : S_MUTED; g.fillText(t, x, sy(n.Y) + n.S * k * scaleOf(n) / 2 + (n.it.idee ? 8 : 5));
+        const ty = sy(n.Y) + n.S * k * scaleOf(n) / 2 + (n.it.idee ? 8 : 5);
+        // aan de rand: een donker blokje erachter, zodat hij leesbaar blijft boven de lijnen
+        if (stuck) { g.fillStyle = 'rgba(10,10,10,.85)'; rr(x - w / 2 - 6, ty - 3, w + 12, 18, 4); g.fill(); g.strokeStyle = n.row.kleur; g.lineWidth = 1; g.stroke(); }
+        g.fillStyle = n.it.idee ? S_INK : S_MUTED; g.fillText(t, x, ty);
       }
     }
     g.globalAlpha = 1; g.textAlign = 'left';
@@ -913,7 +923,7 @@ function stroomPainter(app, M, imgOf, onPic, opt = {}) {
     // het schuift mee langs de linkerrand zolang de rij in beeld is
     g.font = `11px ${S_MONO}`; g.textBaseline = 'middle'; const took = [];
     for (const { r, ns } of rowsD) {
-      if (r.side || !r.lijn) continue;
+      if (r.side || !r.lijn || o.projT === false) continue;
       const top = sy(ns[0].Y) - Math.max(...ns.map(n => n.S * scaleOf(n))) / 2 * k, y = top - 6 - 10; if (y < 4 || y > H + 14) continue;
       const w = g.measureText(r.lijn).width + 16, nat = sx(ns[0].X - ns[0].S / 2), endX = sx(ns[ns.length - 1].X + S_CH) - w;
       const x = Math.min(Math.max(6, nat), Math.max(nat, endX));
@@ -2170,6 +2180,10 @@ class ArchiefView extends ItemView {
   openStroom(keepV, selPath) {
     const { items, pages } = this.plugin.stroom(null), M = miniStroom(items, pages);
     if (!M.main.length) return new Notice('Er staan nog geen items in projecten.');
+    // projectnamen en idee-titels aan/uit (onthouden op dit toestel)
+    let T = { proj: true, idee: true }; try { T = { ...T, ...JSON.parse(localStorage.getItem('am-stroom-titels') || '{}') }; } catch (e) {}
+    const tog = (key, label) => { const b = h('button', { class: 'am-tchip' + (T[key] ? ' am-on' : ''), title: label + ' aan/uit', onclick: () => { T[key] = !T[key]; b.classList.toggle('am-on', T[key]); try { localStorage.setItem('am-stroom-titels', JSON.stringify(T)); } catch (e) {} draw(); } }, label); return b; };
+    const tProj = tog('proj', 'Projecten'), tIdee = tog('idee', 'Ideeën');
     const byPath = new Map(this.data.items.map(it => [it.file.path, it]));
     const cv = h('canvas'), wrap = h('div', { class: 'am-full-cv' }, cv);
     const info = h('div', { class: 'am-plek-info' }, 'Tik op een item.'), acts = h('div', { class: 'am-plek-acts' });
@@ -2182,6 +2196,7 @@ class ArchiefView extends ItemView {
       h('div', { class: 'am-full-bar' },
         h('button', { class: 'am-tool am-close', title: 'Sluiten', onclick: close }, '✕'),
         h('span', { class: 'am-plek-title' }, 'Stroom'),
+        tProj, tIdee,
         h('button', { class: 'am-tool', title: 'Alles in beeld', onclick: () => { const o = v; fitAll(); const t = v; v = o; glideTo(t); } }, '⤢'),
         h('button', { class: 'am-tool', title: 'Naar het nieuwste', onclick: () => { const o = v; toEnd(); const t = v; v = o; glideTo(t); } }, '⇥')),
       wrap, h('div', { class: 'am-plek-bar' }, info, acts));
@@ -2200,7 +2215,7 @@ class ArchiefView extends ItemView {
     // het nieuwste item rechts in beeld, op de hoogte van zijn eigen rij
     const toEnd = () => { const k = Math.min(.9, Math.max(.45, H / (S_ROW * 2.6))), n = SP.all.reduce((p, q) => q.X > p.X ? q : p, SP.all[0]); v = { k, x: W - 40 - (n.X + S_CH) * k, y: H / 2 - n.Y * k }; };
     const draw = () => {
-      const pr = SDPR(); g.setTransform(pr, 0, 0, pr, 0, 0); SP.paint(g, v, W, H, { sel });
+      const pr = SDPR(); g.setTransform(pr, 0, 0, pr, 0, 0); SP.paint(g, v, W, H, { sel, projT: T.proj, ideeT: T.idee });
       // verband leggen: een stippellijn van het item naar je vinger
       if (sel && link && link.to) {
         const x0 = v.x + sel.X * v.k, y0 = v.y + sel.Y * v.k, [x1, y1] = link.to, t = SP.hit(v, x1, y1);
@@ -2431,18 +2446,21 @@ class ArchiefView extends ItemView {
     };
     cv.addEventListener('pointerdown', e => {
       glide++; animV.stop(); // een aanraking houdt een glijdende beweging meteen tegen
+      // de eerste vinger van een nieuwe aanraking: vingers die nog 'vast' stonden vergeten (soms mist de telefoon een loslaten,
+      // dan telde die oude vinger mee en zoomde één vinger)
+      if (e.isPrimary && P.size) { P.clear(); G = null; if (LH) { const l = LH; LH = null; try { l.end(); } catch (err) {} } }
       if (!P.size) { vel = []; pinched = false; }
       e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch (err) {}
       P.set(e.pointerId, sp(e)); last = sp(e); moved = false; clearTimeout(lt);
       if (P.size === 1 && onGrab) { const q = sp(e), hnd = onGrab(q[0], q[1]); if (hnd) { LH = hnd; moved = true; return; } }
       if (P.size === 1 && onLong) { const p0 = sp(e), cx = e.clientX, cy = e.clientY; lt = setTimeout(() => { if (moved || P.size !== 1) return; LH = onLong(p0[0], p0[1], cx, cy); if (LH && navigator.vibrate) navigator.vibrate(25); }, 450); }
-      if (P.size === 2) { const [a, b] = [...P.values()]; G = { d0: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, m0: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], v: { ...getV() } }; moved = true; pinched = true; }
+      if (P.size === 2) { const [a, b] = [...P.values()].slice(-2); G = { d0: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, m0: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], v: { ...getV() } }; moved = true; pinched = true; }
     });
     cv.addEventListener('pointermove', e => {
       if (LH) { LH.move(e.clientX, e.clientY); return; }
       if (!P.has(e.pointerId)) return; const p = sp(e); P.set(e.pointerId, p);
       if (P.size >= 2 && G) {
-        const [a, b] = [...P.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        const [a, b] = [...P.values()].slice(-2), d = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
         const k = Math.min(KMAX, Math.max(KMIN, G.v.k * d / G.d0)), wx = (G.m0[0] - G.v.x) / G.v.k, wy = (G.m0[1] - G.v.y) / G.v.k;
         setV({ k, x: m[0] - wx * k, y: m[1] - wy * k });
       } else if (P.size === 1) {
@@ -2451,13 +2469,14 @@ class ArchiefView extends ItemView {
       }
     });
     const end = e => {
+      if (!P.has(e.pointerId)) return;
       const p = P.get(e.pointerId); P.delete(e.pointerId); clearTimeout(lt);
       if (LH) { const l = LH; LH = null; if (!P.size) l.end(); return; }
       if (!P.size && !moved && p) onTap(...p);
       if (!P.size && moved && !pinched) fling();
       if (P.size < 2) G = null; if (P.size === 1) { last = [...P.values()][0]; vel = []; }
     };
-    cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+    cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end); cv.addEventListener('lostpointercapture', end);
     cv.addEventListener('wheel', e => { e.preventDefault(); const v = getV(), [mx, my] = sp(e), wx = (mx - v.x) / v.k, wy = (my - v.y) / v.k, k = Math.min(KMAX, Math.max(KMIN, v.k * Math.exp(-e.deltaY / 400))); setV({ k, x: mx - wx * k, y: my - wy * k }); }, { passive: false });
   }
 
@@ -2831,6 +2850,8 @@ class ArchiefView extends ItemView {
     };
     cv.addEventListener('pointerdown', e => {
       e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+      // een nieuwe aanraking: vingers die nog 'vast' stonden vergeten (anders zoomt één vinger)
+      if (e.isPrimary && P.size) { P.clear(); if (mode === 'pinch' || mode === 'scale' || mode === 'wait' || mode === 'wait-scale') { mode = null; moving = null; G = null; } }
       P.set(e.pointerId, spos(e));
       if (P.size === 2) {
         // tweede vinger: wat de eerste vinger begon terugdraaien en gaan knijpen
