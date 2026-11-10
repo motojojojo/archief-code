@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.31.0';
+const BUILD = '0.32.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -2548,11 +2548,11 @@ class ArchiefView extends ItemView {
       pick.value = ''; S.tool = 'hand'; tools(); draw();
     });
     const tools = () => {
-      const tool = (k, label, tip) => h('button', { class: 'am-tool' + (S.tool === k && !S.tekst ? ' am-on' : ''), title: tip, onclick: () => { S.tool = k; S.tekst = false; tools(); } }, label);
+      const tool = (k, label, tip) => h('button', { class: 'am-tool' + (S.tool === k && !S.tekst ? ' am-on' : ''), title: tip, onclick: () => { S.tool = k; S.tekst = false; S.edit = null; tools(); } }, label);
       bar.replaceChildren(
         h('button', { class: 'am-tool am-close', title: 'Sluiten', 'aria-label': 'sluiten', onclick: close }, '✕'),
         tool('pen', '✎', 'Tekenen'), tool('gum', '⌫', 'Gum'), tool('hand', '✋', 'Verschuiven en groter/kleiner'),
-        h('button', { class: 'am-tool' + (S.tekst ? ' am-on' : ''), title: 'Tekst', onclick: () => { S.tekst = !S.tekst; tools(); } }, 'T'),
+        h('button', { class: 'am-tool' + (S.tekst ? ' am-on' : ''), title: 'Tekst', onclick: () => { S.tekst = !S.tekst; S.edit = null; tools(); } }, 'T'),
         h('label', { class: 'am-tool', title: 'Foto erop' }, pick, '📷'),
         h('button', { class: 'am-tool', title: 'Ongedaan maken', disabled: !S.undo.length, onclick: () => { if (!S.undo.length) return; S.redo.push(snap()); S.objs = S.undo.pop(); tools(); draw(); } }, '↶'),
         h('button', { class: 'am-tool', title: 'Opnieuw', disabled: !S.redo.length, onclick: () => { if (!S.redo.length) return; S.undo.push(snap()); S.objs = S.redo.pop(); tools(); draw(); } }, '↷'),
@@ -2568,10 +2568,18 @@ class ArchiefView extends ItemView {
       if (S.grid && !kids.length) kids.push(h('div', { class: 'am-tools am-grid-sizes' }, h('span', { class: 'am-grid-lbl' }, 'Raster'),
         GRID_SIZES.map(n => h('button', { class: 'am-chip' + (S.grid === n ? ' am-on' : ''), onclick: () => { S.grid = S.gridSize = n; tools(); draw(); } }, String(n)))));
       if (S.tekst) {
+        // een tekst die al op het bord staat: aanpassen (leeg maken haalt hem weg)
+        const ed = S.edit && S.objs.find(o => o.id === S.edit && o.t === 'text');
         const ti = h('textarea', { rows: 2, placeholder: 'Tekst voor op het bord' });
-        const put = h('button', { class: 'am-np-add' }, 'Op het bord zetten');
+        if (ed) ti.value = ed.text;
+        const put = h('button', { class: 'am-np-add' }, ed ? 'Klaar' : 'Op het bord zetten');
         put.addEventListener('click', () => {
-          const text = ti.value.trim(); if (!text) return;
+          const text = ti.value.trim();
+          if (ed) {
+            if (text !== ed.text || S.ink !== ed.c) { push(); if (text) { ed.text = text; ed.c = S.ink; } else S.objs = S.objs.filter(o => o !== ed); }
+            S.edit = null; S.tekst = false; S.tool = 'hand'; tools(); draw(); return;
+          }
+          if (!text) return;
           push();
           const v = V(), size = (TEXT_SIZES[S.size] || 22) / v.k, w = Math.min(280, W - 40) / v.k, [cx, cy] = toWorld(W / 2, H / 2);
           S.objs.push({ id: oid(), t: 'text', x: Math.round(cx - w / 2), y: Math.round(cy - size), w: Math.round(w), size: Math.round(size), c: S.ink, text });
@@ -2639,7 +2647,8 @@ class ArchiefView extends ItemView {
         this.photoMenu(ctx, im);
         return;
       }
-      down = { t: Date.now(), p: last, id: im ? im.id : null };
+      const tx = !im && S.tool === 'hand' && !S.tekst ? hitAt(x, y) : null;
+      down = { t: Date.now(), p: last, id: im ? im.id : tx && tx.t === 'text' ? tx.id : null };
       if (S.tool === 'pen' && !S.tekst) {
         push(); mode = 'pen'; cur = { id: oid(), t: 'pen', c: S.ink, w: Math.round(S.size / V().k * 10) / 10, pts: [[x, y]] }; S.objs.push(cur);
         view(); g.lineCap = g.lineJoin = 'round'; g.strokeStyle = cur.c; g.lineWidth = cur.w; g.beginPath(); g.moveTo(x, y); g.lineTo(x + .01, y); g.stroke();
@@ -2696,13 +2705,23 @@ class ArchiefView extends ItemView {
       if (tap && !tap.dot && S.tool === 'hand' && !S.tekst && mode === 'move') {
         const im = S.objs.find(o => o.id === tap.id), dbl = lastTap && lastTap.id === tap.id && Date.now() - lastTap.t < 400;
         lastTap = dbl ? null : { id: tap.id, t: Date.now() };
-        S.undo.pop(); tap = null; down = null; mode = null; moving = null; G = null; tools();
+        S.undo.pop(); tap = null; down = null; mode = null; moving = null; G = null;
+        // tik op een tekst: hem aanpassen
+        if (im && im.t === 'text') { lastTap = null; S.tekst = true; S.edit = im.id; S.ink = im.c; tools(); return; }
+        tools();
         // één tik: de strook; dubbeltik: meteen vragen of hij weg mag
         if (im) dbl ? this.deleteMenu(ctx, im) : this.photoMenu(ctx, im);
         return;
       }
       down = null;
-      if (P.size) { if (mode === 'pinch' || mode === 'scale') mode = mode === 'scale' ? 'wait-scale' : 'wait'; return; } // eerst alle vingers los
+      if (P.size) {
+        // van twee naar één vinger: met die ene vinger gewoon doorgaan (de foto/tekst verplaatsen, of het bord verschuiven)
+        if (P.size === 1 && (mode === 'scale' || mode === 'wait-scale') && moving) {
+          mode = 'move'; G = { tx: 0, ty: 0, items: (moving.grp ? S.objs.filter(o => o.grp === moving.grp) : [moving]).map(o => [o, o.x, o.y]) }; last = [...P.values()][0];
+        } else if (P.size === 1 && mode === 'pinch') { mode = 'pan'; last = [...P.values()][0]; }
+        else if (mode === 'pinch' || mode === 'scale') mode = mode === 'scale' ? 'wait-scale' : 'wait';
+        return;
+      }
       if (cur) { cur = null; draw(); }
       if (mode === 'erase' && !erased) S.undo.pop();
       // gedraaid met twee vingers: de foto echt draaien
