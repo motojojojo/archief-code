@@ -40,6 +40,8 @@
       for (const q of parts.slice(0, -1)) { if (!d.kids.has(q)) d.kids.set(q, new DH(q, d.sub(q))); d = d.kids.get(q); }
       const n = parts[parts.length - 1]; d.kids.set(n, new FH(n, p));
     }
+    // ?groot=400: zoveel verzonnen items erbij (zie groot.js)
+    if (window.NEP_N) for (const x of NEP_GROOT(NEP_N)) { const [dir, n] = x.path.split('/'); if (!root.kids.has(dir)) root.kids.set(dir, new DH(dir, dir)); root.kids.get(dir).kids.set(n, new FH(n, x.path, new Blob([x.text]))); }
   });
   window.showDirectoryPicker = async () => { await ready; return root; };
   window.MOCKFS = { root, ready, writes: WRITES, async dump(p) { const h = await p.split('/').slice(0, -1).reduce(async (d, q) => (await d).getDirectoryHandle(q), Promise.resolve(root)); return (await (await h.getFileHandle(p.split('/').pop())).getFile()).text(); } };

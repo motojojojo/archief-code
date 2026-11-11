@@ -13,6 +13,7 @@ input,textarea{background:#2a2a2a;color:#ddd;border:1px solid #444;box-sizing:bo
 </style>
 <link rel="stylesheet" href="../plugin/archief-mobiel/styles.css">
 </head><body><div id="view"></div><div id="toasts"></div><div class="mobile-navbar" style="position:fixed;left:40px;right:40px;bottom:24px;height:50px;border-radius:25px;background:#555;z-index:9"></div>
+<script src="groot.js"></script>
 <script>
 // ---- nep-Obsidian, net genoeg om de plugin te draaien ----
 const BASE = 'kluis/';
@@ -39,7 +40,7 @@ function dumpFM(fm, body) {
   }
   return `---\n${L.join('\n')}\n---\n${body}`;
 }
-class TFile { constructor(path) { this.path = path; this.name = path.split('/').pop(); this.basename = this.name.replace(/\.[^.]+$/, ''); this.extension = (this.name.match(/\.([^.]+)$/) || [, ''])[1]; this.stat = { mtime: Date.now(), size: 0 }; } }
+class TFile { constructor(path) { this.path = path; this.name = path.split('/').pop(); this.basename = this.name.replace(/\.[^.]+$/, ''); this.extension = (this.name.match(/\.([^.]+)$/) || [, ''])[1]; this.stat = { mtime: window.BOOT ? Date.now() : 1790000000000, size: 0 }; } }
 const files = new Map();
 const app = {
   vault: {
@@ -86,11 +87,12 @@ window.STORE = store; window.FILES = files; window.CREATED = created;
 (async () => {
   const list = await (await fetch('files.json')).json();
   await Promise.all(list.map(async p => { const f = new TFile(p); files.set(p, f); if (p.endsWith('.md')) store.set(p, { text: await (await fetch(BASE + p.split('/').map(encodeURIComponent).join('/'))).text() }); }));
+  if (window.NEP_N) for (const x of NEP_GROOT(NEP_N)) { files.set(x.path, new TFile(x.path)); store.set(x.path, { text: x.text }); }
   const src = await (await fetch('../plugin/archief-mobiel/main.js?' + Date.now())).text();
   const module = { exports: {} };
   new Function('module', 'exports', 'require', src)(module, module.exports, window.require);
   const P = new module.exports(app); P.manifest = await (await fetch('../plugin/archief-mobiel/manifest.json')).json(); P.manifest.dir = 'PLUGIN'; window.DISKVER = P.manifest.version; app.plugins = { plugins: { 'remotely-save': { syncStatus: 'idle' } } }; await P.onload();
-  window.PLUGIN = P;
+  window.PLUGIN = P; window.BOOT = true; // bestanden uit de testkluis hebben een vaste datum, wat daarna gemaakt wordt krijgt de tijd van nu
   window.VIEW = P.views['archief-mobiel'](leaf);
   await VIEW.onOpen();
 })();
