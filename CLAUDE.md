@@ -11,6 +11,7 @@ Code voor Milo's kunstarchief (een Obsidian-kluis). Milo spreekt Nederlands: ant
   - `test/visualisator.html` — opent de Visualisator op de nepkluis (`?f=experiment.html` voor de experiment-versie). Schrijven gebeurt alleen in het geheugen van het tabblad.
   - `test/plugin.html` — draait de plugin in een nep-Obsidian op de nepkluis. Variabelen: `PLUGIN`, `VIEW`, `LOG`; `window.GH` / `window.GH_OFFLINE` doen alsof GitHub iets anders heeft of offline is.
   - `?groot=400` achter een van de testpagina's voegt 400 verzonnen items toe (alleen in het geheugen, zie `test/groot.js`), om snelheid en drukte te testen.
+- Vaste tests: `test/auto/run.js` loopt de belangrijkste dingen na op de nepkluis (Visualisator, experiment en plugin). Draaien: `cd test/auto && npm install && npx playwright install chromium && npm test`. GitHub draait ze vanzelf bij elke pull request (`.github/workflows/test.yml`). Maak je iets nieuws, zet er dan een test bij.
 - Testserver: `python -m http.server 8770` vanuit deze map (staat ook in `.claude/launch.json`), dan `http://localhost:8770/test/visualisator.html` of `/test/plugin.html`.
 
 ## Vaste regels

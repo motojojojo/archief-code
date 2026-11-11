@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.38.0';
+const BUILD = '0.39.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -2251,6 +2251,7 @@ class ArchiefView extends ItemView {
     const soon = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (root.isConnected) draw(); }); };
     const SP = stroomPainter(this.app, M, it => this.stroomImg(it), soon);
     this.plugin.vbSoorten().then(s => { SP.setSoorten(s); soon(); });
+    this.sDbg = { SP, v: () => v }; // voor de tests: waar staat welk item
     const size = () => { const r = SDPR(); W = wrap.clientWidth; H = wrap.clientHeight; cv.style.width = W + 'px'; cv.style.height = H + 'px'; cv.width = Math.round(W * r); cv.height = Math.round(H * r); };
     const onResize = () => { size(); draw(); };
     window.addEventListener('resize', onResize);
@@ -2448,7 +2449,9 @@ class ArchiefView extends ItemView {
       const G = h('div', { class: 'am-groot' }, img, h('div', { class: 'am-groot-top' }, h('span', { class: 'am-groot-t' }, node.it.title), teller, h('button', { class: 'am-tool', title: 'Sluiten', onclick: e => { e.stopPropagation(); G.remove(); } }, '✕')));
       G.addEventListener('pointerdown', e => { x0 = e.clientX; y0 = e.clientY; });
       G.addEventListener('pointerup', e => {
-        if (x0 == null || e.target.closest('button')) return;
+        // sluiten bij het loslaten op ✕ (een 'klik' komt niet altijd door als je net geveegd hebt)
+        if (e.target.closest('button')) return G.remove();
+        if (x0 == null) return;
         const dx = e.clientX - x0, dy = e.clientY - y0; x0 = null;
         if (Math.abs(dy) > 70 && Math.abs(dy) > Math.abs(dx)) return G.remove();
         if (fs.length < 2) { if (Math.abs(dx) < 10 && Math.abs(dy) < 10) G.remove(); return; }

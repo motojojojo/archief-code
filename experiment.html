@@ -1739,17 +1739,21 @@ function applyFilter() {
 /* ---------- pannen & zoomen ---------- */
 function makeZoom(svg, g, onChange) {
   const t = { k: 1, x: 0, y: 0, moved: false };
+  let raf = 0;
   const apply = () => {
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
     g.setAttribute('transform', `translate(${t.x},${t.y}) scale(${t.k})`);
     // zoomniveaus: ver weg = kleurvlakken per lijn, dichtbij = titels onder de beelden
     svg.classList.toggle('zoomed', t.k > 1.4); svg.classList.toggle('far', t.k < .5);
     if (onChange) onChange();
   };
-  const zoomAt = (mx, my, f) => { const k = Math.min(6, Math.max(.08, t.k * f)); t.x = mx - (mx - t.x) * k / t.k; t.y = my - (my - t.y) * k / t.k; t.k = k; apply(); };
+  // tijdens slepen en zoomen komt de muis vaker binnen dan het scherm ververst: dan één keer per beeldje tekenen
+  const soon = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; apply(); }); };
+  const zoomAt = (mx, my, f, later) => { const k = Math.min(6, Math.max(.08, t.k * f)); t.x = mx - (mx - t.x) * k / t.k; t.y = my - (my - t.y) * k / t.k; t.k = k; later ? soon() : apply(); };
   svg.addEventListener('wheel', e => {
     e.preventDefault(); const r = svg.getBoundingClientRect();
-    if (e.shiftKey) { t.x -= e.deltaY; apply(); return; }
-    zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * (e.ctrlKey ? .01 : .0015)));
+    if (e.shiftKey) { t.x -= e.deltaY; soon(); return; }
+    zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * (e.ctrlKey ? .01 : .0015)), true);
   }, { passive: false });
   const pts = new Map(); let last = null, pinch = null;
   svg.addEventListener('pointerdown', e => {
@@ -1764,11 +1768,11 @@ function makeZoom(svg, g, onChange) {
     pts.set(e.pointerId, [e.clientX, e.clientY]);
     if (pts.size === 2) {
       const [a, b] = [...pts.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]); const r = svg.getBoundingClientRect();
-      if (pinch) zoomAt((a[0] + b[0]) / 2 - r.left, (a[1] + b[1]) / 2 - r.top, d / pinch);
+      if (pinch) zoomAt((a[0] + b[0]) / 2 - r.left, (a[1] + b[1]) / 2 - r.top, d / pinch, true);
       pinch = d; t.moved = true; return;
     }
     const dx = e.clientX - last[0], dy = e.clientY - last[1];
-    t.x += dx; t.y += dy; apply();
+    t.x += dx; t.y += dy; soon();
     if (!t.moved && Math.hypot(e.clientX - t.start[0], e.clientY - t.start[1]) > 4) { t.moved = true; try { svg.setPointerCapture(e.pointerId); } catch (err) {} }
     last = [e.clientX, e.clientY];
   });
@@ -2623,8 +2627,12 @@ function stroomOverlay() {
   if (ovRaf) return;
   ovRaf = requestAnimationFrame(() => { ovRaf = 0; drawRuler(); drawMiniView(); });
 }
+// de breedte van de Stroom, onthouden tot het venster verandert: uitlezen vlak na het verschuiven is duur
+let stroomWv = 0, stroomHv = 0;
+const stroomW = () => stroomWv || (stroomWv = $('#stroom-svg').clientWidth), stroomH = () => stroomHv || (stroomHv = $('#stroom-svg').clientHeight);
+try { new ResizeObserver(() => { stroomWv = stroomHv = 0; }).observe($('#stroom-svg')); } catch (e) {}
 function drawRuler() {
-  const r = $('#ruler'), t = zStroom.t, W = $('#stroom-svg').clientWidth;
+  const r = $('#ruler'), t = zStroom.t, W = stroomW();
   if (!timeMode || view !== 'stroom' || !stroomMonths.length) { r.innerHTML = ''; return; }
   let s = '', end = -1e9, lastY = '';
   stroomMonths.forEach((m, i) => {
@@ -2648,7 +2656,7 @@ function drawRuler() {
 const lblLift = new Map();
 let lblAnim = 0;
 function pinLabels() {
-  const t = zStroom.t, left = (14 - t.x) / t.k, right = ($('#stroom-svg').clientWidth - t.x) / t.k, sc = Math.min(3.5, Math.max(1, 1 / t.k)), H = CARD / 2;
+  const t = zStroom.t, left = (14 - t.x) / t.k, right = (stroomW() - t.x) / t.k, sc = Math.min(3.5, Math.max(1, 1 / t.k)), H = CARD / 2;
   const hosts = new Map();
   let moving = false;
   for (const g of $$('#stroom-g .lbl[data-k]')) {
@@ -2729,7 +2737,7 @@ function buildMinimap() {
 function drawMiniView() {
   const m = $('#minimap'), svg = $('#stroom-svg'), t = zStroom.t;
   if (view !== 'stroom' || !stroomRows.length) { m.toggleAttribute('hidden', true); return; }
-  const W = svg.clientWidth, H = svg.clientHeight;
+  const W = stroomW(), H = stroomH();
   const x0 = -t.x / t.k, y0 = -t.y / t.k, x1 = x0 + W / t.k, y1 = y0 + H / t.k;
   // alles past in beeld: dan is de kaart niet nodig
   const all = x0 <= mm.bx && y0 <= mm.by && x1 >= mm.bx + mm.w / mm.s && y1 >= mm.by + mm.h / mm.s;
@@ -5420,7 +5428,7 @@ function renderView(dataChanged) {
     const first = !$(view === 'stroom' ? '#stroom-g' : '#net-g').childElementCount;
     if (view === 'stroom') renderStroom(first);
     if (view === 'netwerk') { if (net.raf) { cancelAnimationFrame(net.raf); net.raf = 0; } renderNetwerk(first); }
-    if (view === 'raster') renderRaster();
+    // (het Logboek tekent applyFilter hieronder al, dus hier niet nog een keer)
     if (view === 'inbox') renderInbox();
     if (view === 'producten') renderProducten();
     if (view === 'ideeen') renderIdeeen();
