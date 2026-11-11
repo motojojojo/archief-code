@@ -1,0 +1,1 @@
+{ "private": true, "name": "archief-tests", "scripts": { "test": "node run.js" }, "dependencies": { "playwright": "^1.56.0" } }
