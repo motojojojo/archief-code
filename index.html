@@ -3651,7 +3651,12 @@ function withWerk(raw, d, list) {
 // de notitie met een andere tekst; de frontmatter (met de werktijden) blijft staan
 const withText = (raw, d, t) => { const m = raw && raw.match(LOG_FM); return (m ? m[0].replace(/\n?$/, '\n') : `---\ntype: logboek\ndatum: ${d}\n---\n`) + (t ? t + '\n' : ''); };
 // minuten gewerkt op dag d; een tijd zonder eindtijd telt tot nu, een eindtijd vóór de begintijd is na middernacht
-const werkMin = (d, list) => (list || []).reduce((n, w) => n + (w.tot ? (wtMin(w.tot) - wtMin(w.van) + 1440) % 1440 : Math.max(0, (Date.now() - new Date(d + 'T' + w.van)) / 6e4)), 0);
+// een klok die al langer dan 12 uur loopt is vergeten: die telt niet mee tot je de eindtijd hebt ingevuld
+const KLOK_MAX = 12 * 60;
+const openMin = (d, van) => Math.max(0, (Date.now() - new Date(d + 'T' + van)) / 6e4);
+const klokVergeten = run => !!run && openMin(run.d, run.van) > KLOK_MAX;
+const eindGok = van => wtMin(van) < 17 * 60 ? '17:00' : wtMin(van) < 23 * 60 ? String(+van.slice(0, 2) + 1).padStart(2, '0') + van.slice(2) : '23:59';
+const werkMin = (d, list) => (list || []).reduce((n, w) => { const o = w.tot ? 0 : openMin(d, w.van); return n + (w.tot ? (wtMin(w.tot) - wtMin(w.van) + 1440) % 1440 : o > KLOK_MAX ? 0 : o); }, 0);
 const sortWerk = l => l.filter(w => /^\d\d:\d\d$/.test(w.van)).sort((a, b) => a.van.localeCompare(b.van));
 // loopt de klok? (de laatste dag met een tijd zonder eindtijd)
 function klokLoopt() {
@@ -3668,7 +3673,7 @@ async function saveWerk(d, change) {
 function klokUi() {
   const b = $('#lb-klok'); if (!b) return;
   const run = klokLoopt(), today = isoDay(Date.now());
-  b.textContent = run ? `⏹ Uitklokken · ${fmtDur(werkMin(run.d, [{ van: run.van, tot: '' }]))}` : '⏱ Inklokken';
+  b.textContent = klokVergeten(run) ? '⏹ Vergeten uit te klokken?' : run ? `⏹ Uitklokken · ${fmtDur(werkMin(run.d, [{ van: run.van, tot: '' }]))}` : '⏱ Inklokken';
   b.classList.toggle('klok-aan', !!run);
   b.title = run ? `Ingeklokt sinds ${run.d === today ? '' : dayLabel(run.d) + ' '}${run.van}. Klik om uit te klokken.` : 'Begin met werken: de klok gaat lopen (ook als je de visualisator sluit)';
   const ma = addDays(today, -((new Date().getDay() + 6) % 7)), zo = addDays(ma, 6);
@@ -3683,6 +3688,16 @@ async function klok() {
     await loadFromHandle(true); // misschien is er intussen op de telefoon in- of uitgeklokt
     const run = klokLoopt(), now = Date.now(), today = isoDay(now);
     if (!run) { await saveWerk(today, l => [...l, { van: hhmm(now), tot: '' }]); toast(`Ingeklokt om ${hhmm(now)}.`); }
+    else if (klokVergeten(run)) {
+      // vergeten uit te klokken: vragen tot hoe laat je werkte
+      let t = prompt(`De klok loopt nog sinds ${dayLabel(run.d)} ${run.van}.\n\nTot hoe laat werkte je toen? (uu:mm)`, eindGok(run.van));
+      if (t == null) return;
+      const m = t.trim().match(/^(\d{1,2})[:.u ]?(\d\d)$/);
+      if (!m || +m[1] > 23 || +m[2] > 59) return alert('Dat is geen tijd. Typ bijvoorbeeld 17:30.');
+      t = m[1].padStart(2, '0') + ':' + m[2];
+      await saveWerk(run.d, l => { const w = l.find(x => !x.tot && x.van === run.van); if (w) w.tot = t; return l.filter(x => x !== w || x.tot !== x.van); });
+      toast(`Uitgeklokt: ${dayLabel(run.d)} ${run.van}–${t}.`);
+    }
     else {
       let tot = hhmm(now);
       // vergeten uit te klokken op een eerdere dag: dan stopt hij om 23:59 die dag (behalve als je net na middernacht doorwerkte)

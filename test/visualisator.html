@@ -2,12 +2,13 @@
 <meta charset="utf-8">
 <title>Visualisator test</title>
 <!-- Opent de Visualisator (../index.html, of ?f=experiment.html) op de NEP-kluis in test/kluis.
-     Schrijven gaat alleen naar het geheugen van dit tabblad. -->
+     Schrijven gaat alleen naar het geheugen van dit tabblad.
+     ?groot=400 voegt 400 verzonnen items toe (zie groot.js). -->
 <script>
 (async () => {
   const f = new URLSearchParams(location.search).get('f') || 'index.html';
   let html = await (await fetch('../' + f + '?' + Date.now())).text();
-  const inject = '<script src="mockfs.js"><\/script>';
+  const inject = '<script src="groot.js"><\/script><script src="mockfs.js"><\/script>';
   html = html.replace(/<head[^>]*>/i, m => m + inject);
   html = html.replace(/<\/body>/i, '<script>setTimeout(() => openFolder(), 300);<\/script></body>');
   document.open(); document.write(html); document.close();

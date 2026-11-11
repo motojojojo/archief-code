@@ -10,6 +10,7 @@ Code voor Milo's kunstarchief (een Obsidian-kluis). Milo spreekt Nederlands: ant
   - `test/kluis/` — een NEP-kluis met verzonnen notities en plaatjes (maak opnieuw met `python test/maak-testkluis.py`; vul hem gerust aan als je iets nieuws wilt testen).
   - `test/visualisator.html` — opent de Visualisator op de nepkluis (`?f=experiment.html` voor de experiment-versie). Schrijven gebeurt alleen in het geheugen van het tabblad.
   - `test/plugin.html` — draait de plugin in een nep-Obsidian op de nepkluis. Variabelen: `PLUGIN`, `VIEW`, `LOG`; `window.GH` / `window.GH_OFFLINE` doen alsof GitHub iets anders heeft of offline is.
+  - `?groot=400` achter een van de testpagina's voegt 400 verzonnen items toe (alleen in het geheugen, zie `test/groot.js`), om snelheid en drukte te testen.
 - Testserver: `python -m http.server 8770` vanuit deze map (staat ook in `.claude/launch.json`), dan `http://localhost:8770/test/visualisator.html` of `/test/plugin.html`.
 
 ## Vaste regels

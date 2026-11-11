@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.37.0';
+const BUILD = '0.38.0';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -364,7 +364,12 @@ function withWerk(raw, d, list) {
 // de notitie met een andere tekst; de frontmatter (met de werktijden) blijft staan
 const withText = (raw, d, t) => { const m = raw && raw.match(LOG_FM); return (m ? m[0].replace(/\n?$/, '\n') : `---\ntype: logboek\ndatum: ${d}\n---\n`) + (t ? t + '\n' : ''); };
 // minuten gewerkt op dag d; een tijd zonder eindtijd telt tot nu, een eindtijd vóór de begintijd is na middernacht
-const werkMin = (d, list) => (list || []).reduce((n, w) => n + (w.tot ? (wtMin(w.tot) - wtMin(w.van) + 1440) % 1440 : Math.max(0, (Date.now() - new Date(d + 'T' + w.van)) / 6e4)), 0);
+// een klok die al langer dan 12 uur loopt is vergeten: die telt niet mee tot je de eindtijd hebt ingevuld
+const KLOK_MAX = 12 * 60;
+const openMin = (d, van) => Math.max(0, (Date.now() - new Date(d + 'T' + van)) / 6e4);
+const klokVergeten = run => !!run && openMin(run.d, run.van) > KLOK_MAX;
+const eindGok = van => wtMin(van) < 17 * 60 ? '17:00' : wtMin(van) < 23 * 60 ? String(+van.slice(0, 2) + 1).padStart(2, '0') + van.slice(2) : '23:59';
+const werkMin = (d, list) => (list || []).reduce((n, w) => { const o = w.tot ? 0 : openMin(d, w.van); return n + (w.tot ? (wtMin(w.tot) - wtMin(w.van) + 1440) % 1440 : o > KLOK_MAX ? 0 : o); }, 0);
 const sortWerk = l => l.filter(w => /^\d\d:\d\d$/.test(w.van)).sort((a, b) => a.van.localeCompare(b.van));
 const addDay = (d, n) => { const x = new Date(d + 'T12:00:00'); x.setDate(x.getDate() + n); return isoDay(x); };
 /* ---------- mini-stroom: zelfde regels als de Stroom van de visualisator, maar simpel getekend ---------- */
@@ -658,6 +663,14 @@ function placeVbLabels(list) {
 }
 
 // de stroom hoeft niet scherper dan 2x: op een iPhone (3x) scheelt dat ruim de helft van het tekenwerk
+// kleine plaatjes voor de stroom: onthouden zolang Obsidian open is (THUMBS) en bewaard op de telefoon (IndexedDB),
+// zodat ze niet bij elke keer openen opnieuw van de grote foto's gemaakt worden. De sleutel verandert als de foto verandert.
+const THUMB_Q = 160, THUMBS = new Map();
+const thumbKey = f => f.path + '|' + ((f.stat && f.stat.mtime) || 0) + '|' + ((f.stat && f.stat.size) || 0);
+let thumbDbP = null;
+const thumbDb = () => thumbDbP || (thumbDbP = new Promise(res => { try { const r = indexedDB.open('archief-mobiel-plaatjes', 1); r.onupgradeneeded = () => r.result.createObjectStore('t'); r.onsuccess = () => res(r.result); r.onerror = () => res(null); r.onblocked = () => res(null); } catch (e) { res(null); } }));
+const thumbGet = k => thumbDb().then(db => db ? new Promise(res => { try { const r = db.transaction('t').objectStore('t').get(k); r.onsuccess = () => res(r.result || null); r.onerror = () => res(null); } catch (e) { res(null); } }) : null);
+const thumbPut = (k, b) => thumbDb().then(db => { if (db) try { db.transaction('t', 'readwrite').objectStore('t').put(b, k); } catch (e) {} });
 const SDPR = () => Math.min(2, window.devicePixelRatio || 1);
 // het beeld van a naar b laten glijden (afremmend); een nieuwe beweging of aanraking stopt de vorige
 function animV(get, set, to, ms = 380) {
@@ -768,24 +781,39 @@ function stroomPainter(app, M, imgOf, onPic, opt = {}) {
   };
   // plaatjes: alleen wat in beeld is laden, en verkleind bewaren zodat tekenen snel blijft
   const pics = new Map(), widths = new Map(); let loading = 0, need = [], dead = false;
+  // al eerder gemaakt (deze keer dat Obsidian open is): meteen gebruiken, dan staat de stroom direct vol
+  for (const n of all) if (n.img) { const e = THUMBS.get(thumbKey(n.img)); if (e) pics.set(n.img.path, e); }
   const pump = () => {
     while (loading < 4 && need.length) {
       const f = need.shift(); if (pics.has(f.path)) continue;
-      const im = new Image(); pics.set(f.path, null); loading++;
-      const fin = ok => {
-        loading--;
-        if (ok && im.naturalWidth) {
-          const c = document.createElement('canvas'), q = 160, s0 = Math.min(im.naturalWidth, im.naturalHeight);
-          c.width = c.height = q; c.getContext('2d').drawImage(im, (im.naturalWidth - s0) / 2, (im.naturalHeight - s0) / 2, s0, s0, 0, 0, q, q);
-          // ook een ronde versie (voor ideeën), dan hoeft er bij het tekenen niet geknipt te worden
-          const o = document.createElement('canvas'); o.width = o.height = q; const og = o.getContext('2d');
-          og.fillStyle = '#f4f1ea'; og.beginPath(); og.arc(q / 2, q / 2, q / 2, 0, 7); og.fill(); og.clip(); og.drawImage(c, 0, 0);
-          const e = { sq: c, rd: o }; pics.set(f.path, e);
-          if (window.createImageBitmap) Promise.all([createImageBitmap(c), createImageBitmap(o)]).then(([a, b]) => { e.sq = a; e.rd = b; }).catch(() => {});
-        } else pics.set(f.path, false);
-        if (!dead) { onPic(); pump(); }
+      const key = thumbKey(f); pics.set(f.path, null); loading++;
+      const done = e => { loading--; pics.set(f.path, e); if (e) THUMBS.set(key, e); if (!dead) { onPic(); pump(); } };
+      // van een vierkant plaatje (canvas of bewaard bestandje) de twee versies maken: vierkant en rond (voor ideeën)
+      const make = src => {
+        const q = THUMB_Q, c = document.createElement('canvas'); c.width = c.height = q; c.getContext('2d').drawImage(src, 0, 0, q, q);
+        const o = document.createElement('canvas'); o.width = o.height = q; const og = o.getContext('2d');
+        og.fillStyle = '#f4f1ea'; og.beginPath(); og.arc(q / 2, q / 2, q / 2, 0, 7); og.fill(); og.clip(); og.drawImage(c, 0, 0);
+        const e = { sq: c, rd: o };
+        if (window.createImageBitmap) Promise.all([createImageBitmap(c), createImageBitmap(o)]).then(([a, b]) => { e.sq = a; e.rd = b; }).catch(() => {});
+        return e;
       };
-      im.onload = () => fin(true); im.onerror = () => fin(false); im.src = app.vault.getResourcePath(f);
+      const fresh = () => {
+        const im = new Image();
+        im.onload = () => {
+          if (!im.naturalWidth) return done(false);
+          const q = THUMB_Q, c = document.createElement('canvas'), s0 = Math.min(im.naturalWidth, im.naturalHeight);
+          c.width = c.height = q; c.getContext('2d').drawImage(im, (im.naturalWidth - s0) / 2, (im.naturalHeight - s0) / 2, s0, s0, 0, 0, q, q);
+          try { c.toBlob(bl => { if (bl) thumbPut(key, bl); }, 'image/jpeg', .82); } catch (e) {}
+          done(make(c));
+        };
+        im.onerror = () => done(false); im.src = app.vault.getResourcePath(f);
+      };
+      // bewaard van een vorige keer? dan hoeft de grote foto niet geladen te worden
+      thumbGet(key).then(bl => {
+        if (!bl) return fresh();
+        const im = new Image(), u = URL.createObjectURL(bl);
+        im.onload = () => { URL.revokeObjectURL(u); done(make(im)); }; im.onerror = () => { URL.revokeObjectURL(u); fresh(); }; im.src = u;
+      });
     }
   };
   const paint = (g, v, W, H, o = {}) => {
@@ -1314,8 +1342,10 @@ module.exports = class ArchiefMobiel extends Plugin {
     return null;
   }
   // in- of uitklokken; geeft terug wat er gebeurde
-  async klok() {
+  async klok(eind) {
     const run = await this.klokLoopt(), now = Date.now(), today = isoDay(now);
+    // vergeten uit te klokken en de eindtijd is gekozen
+    if (run && eind) { await this.werkSave(run.d, l => { const w = l.find(x => !x.tot && x.van === run.van); if (w) w.tot = eind; return l.filter(x => x !== w || x.tot !== x.van); }); return { msg: `Uitgeklokt: ${fmtD(run.d)} ${run.van}–${eind}` }; }
     if (!run) { await this.werkSave(today, l => [...l, { van: hhmm(now), tot: '' }]); return { msg: `Ingeklokt om ${hhmm(now)}` }; }
     let tot = hhmm(now), lang = false;
     // vergeten uit te klokken op een eerdere dag: dan stopt hij om 23:59 die dag (behalve als je net na middernacht doorwerkte)
@@ -2185,6 +2215,20 @@ class ArchiefView extends ItemView {
     const tog = (key, label) => { const b = h('button', { class: 'am-tchip' + (T[key] ? ' am-on' : ''), title: label + ' aan/uit', onclick: () => { T[key] = !T[key]; b.classList.toggle('am-on', T[key]); try { localStorage.setItem('am-stroom-titels', JSON.stringify(T)); } catch (e) {} draw(); } }, label); return b; };
     const tProj = tog('proj', 'Projecten'), tIdee = tog('idee', 'Ideeën');
     const byPath = new Map(this.data.items.map(it => [it.file.path, it]));
+    // ongedaan maken: vóór elke wijziging in de stroom wordt de tekst van de notities die veranderen onthouden;
+    // terugdraaien zet die tekst terug. De stapel blijft staan als de stroom opnieuw getekend wordt.
+    const U = this.sUndo || (this.sUndo = []);
+    const snap = async paths => { const out = []; for (const p of new Set(paths.filter(Boolean))) { const f = this.app.vault.getAbstractFileByPath(p); if (f && f.extension === 'md') out.push({ path: p, text: await this.app.vault.read(f) }); } return out; };
+    const remember = (label, files) => { if (!files.length) return; U.push({ label, files }); if (U.length > 30) U.shift(); undoBtn.disabled = false; };
+    const reopen = async (keep, path) => { await new Promise(r => setTimeout(r, 700)); close(); this.data = await this.plugin.choices(); this.openStroom(keep, path); };
+    const undoBtn = h('button', { class: 'am-tool am-undo', title: 'Ongedaan maken', disabled: !U.length, onclick: async () => {
+      const u = U.pop(); if (!u) return; undoBtn.disabled = true;
+      try {
+        for (const x of u.files) { const f = this.app.vault.getAbstractFileByPath(x.path); if (f) await this.app.vault.modify(f, x.text); }
+        new Notice('Teruggedraaid: ' + u.label); this.plugin.sync();
+      } catch (e) { console.error(e); new Notice('Terugdraaien lukte niet: ' + (e && e.message || e), 8000); }
+      await reopen({ ...v }, sel && sel.it.path);
+    } }, '↶');
     const cv = h('canvas'), wrap = h('div', { class: 'am-full-cv' }, cv);
     const info = h('div', { class: 'am-plek-info' }, 'Tik op een item.'), acts = h('div', { class: 'am-plek-acts' });
     const close = () => {
@@ -2196,7 +2240,7 @@ class ArchiefView extends ItemView {
       h('div', { class: 'am-full-bar' },
         h('button', { class: 'am-tool am-close', title: 'Sluiten', onclick: close }, '✕'),
         h('span', { class: 'am-plek-title' }, 'Stroom'),
-        tProj, tIdee,
+        tProj, tIdee, undoBtn,
         h('button', { class: 'am-tool', title: 'Alles in beeld', onclick: () => { const o = v; fitAll(); const t = v; v = o; glideTo(t); } }, '⤢'),
         h('button', { class: 'am-tool', title: 'Naar het nieuwste', onclick: () => { const o = v; toEnd(); const t = v; v = o; glideTo(t); } }, '⇥')),
       wrap, h('div', { class: 'am-plek-bar' }, info, acts));
@@ -2275,9 +2319,10 @@ class ArchiefView extends ItemView {
     const topSheet = title => { const M = this.sheet(title), back = M.box.parentElement; back.style.zIndex = 80; root.append(back); return M; };
     // welk product (meer mag), of 'weet ik niet meer'; meteen bewaard
     const prodSheet = (it, tag) => {
-      const M = topSheet(`Welk ${tag}? (meer dan één mag)`);
+      const M = topSheet(`Welk ${tag}? (meer dan één mag)`); let vooraf = snap([it.file.path]);
       const save = async () => {
         const f = this.app.vault.getAbstractFileByPath(it.file.path); if (!f) return;
+        if (vooraf) { remember(`product bij “${short(it.file.basename, 20)}”`, await vooraf); vooraf = null; }
         await this.app.fileManager.processFrontMatter(f, fm => {
           if (it.producten.length) fm.producten = it.producten.map(t => `[[${t}]]`); else delete fm.producten;
           if (it.onbekend.length) fm.product_onbekend = it.onbekend; else delete fm.product_onbekend;
@@ -2309,17 +2354,57 @@ class ArchiefView extends ItemView {
         M.close();
         const f = this.app.vault.getAbstractFileByPath(a.it.path); if (!f) return;
         try {
+          const was = await snap([a.it.path]);
           await this.app.fileManager.processFrontMatter(f, fm => { fm.verbanden = [...arr(fm.verbanden).map(String), `[[${b.it.title}]] | ${soort}`]; });
+          remember('verband gelegd', was);
           new Notice(`“${short(a.it.title, 20)}” ${soort} “${short(b.it.title, 20)}”`); this.plugin.sync();
         } catch (e) { console.error(e); return new Notice('Verband leggen lukte niet: ' + (e && e.message || e), 8000); }
         // even wachten tot Obsidian de notitie opnieuw gelezen heeft; dan de stroom opnieuw, met het item nog gekozen
-        const keep = { ...v }, path = a.it.path;
-        await new Promise(r => setTimeout(r, 700));
-        close(); this.data = await this.plugin.choices(); this.openStroom(keep, path);
+        await reopen({ ...v }, a.it.path);
       };
       const nieuw = this.adder('+ nieuw soort verband', v2 => add(v2));
       M.set(...soorten.map(sk => h('button', { class: 'am-menu-btn am-vb-row', onclick: () => add(sk.naam) }, h('span', { class: 'am-vb-dot', style: `background:${sk.kleur}` }), (has(sk.naam) ? '✓ ' : '') + sk.naam)),
         nieuw, h('button', { class: 'am-menu-btn', onclick: () => M.close() }, 'Annuleren'));
+    };
+    // de verbanden van het gekozen item: tik er een aan om het soort te veranderen, de pijl om te draaien of het weg te halen
+    const vbList = node => {
+      const mine = SP.vbs.filter(x => x.a === node || x.b === node), M = topSheet(`Verbanden van “${short(node.it.title, 22)}”`);
+      this.plugin.vbSoorten().then(soorten => {
+        const kleur = s => (soorten.find(k => lw(k.naam) === lw(s)) || {}).kleur || '#9a9a9a';
+        M.set(...mine.map(x => h('button', { class: 'am-menu-btn am-vb-row', onclick: () => vbEdit(x, node, soorten) }, h('span', { class: 'am-vb-dot', style: `background:${kleur(x.v.soort)}` }),
+          h('span', {}, x.a === node ? `${x.v.soort} → ${short(x.b.it.title, 26)}` : `${short(x.a.it.title, 26)} → ${x.v.soort}`))),
+          h('button', { class: 'am-menu-btn', onclick: () => M.close() }, 'Sluiten'));
+      });
+    };
+    const vbEdit = (x, node, soorten) => {
+      const a = x.a, b = x.b, M = topSheet(`“${short(a.it.title, 16)}” ${x.v.soort} “${short(b.it.title, 16)}”`);
+      // is dit het verband naar b met dit soort? (een oud 'volgt op' telt als 'bouwt voort op')
+      const is = raw => parseVb([raw]).some(o => lw(o.to) === lw(b.it.title) && o.soort === x.v.soort);
+      const oud = raw => x.v.soort === VB_BASE && lw(linkTitle(raw).split('/').pop()) === lw(b.it.title);
+      // haalt het verband uit de notitie van a; met 'nieuw' komt er een ander voor in de plaats (in a, of in b bij omdraaien)
+      const change = async (label, nieuw, naarB) => {
+        M.close();
+        const fa = this.app.vault.getAbstractFileByPath(a.it.path), fb = this.app.vault.getAbstractFileByPath(b.it.path); if (!fa || (naarB && !fb)) return;
+        try {
+          const was = await snap([a.it.path, naarB ? b.it.path : null]);
+          await this.app.fileManager.processFrontMatter(fa, fm => {
+            const keep = arr(fm.verbanden).map(String).filter(r => !is(r));
+            if (nieuw && !naarB) keep.push(nieuw);
+            if (keep.length) fm.verbanden = keep; else delete fm.verbanden;
+            for (const k of ['volgt_op', 'volgt op', 'volgtop']) if (k in fm) { const rest = arr(fm[k]).map(String).filter(r => !oud(r)); if (rest.length) fm[k] = rest; else delete fm[k]; }
+          });
+          if (nieuw && naarB) await this.app.fileManager.processFrontMatter(fb, fm => { fm.verbanden = [...arr(fm.verbanden).map(String), nieuw]; });
+          remember(label, was); new Notice('Verband ' + label.replace(/^verband /, '')); this.plugin.sync();
+        } catch (e) { console.error(e); return new Notice('Dat lukte niet: ' + (e && e.message || e), 8000); }
+        await reopen({ ...v }, node.it.path);
+      };
+      const tail = x.v.label ? ' | ' + x.v.label : '';
+      M.set(h('p', { class: 'am-hint' }, 'Ander soort verband:'),
+        ...soorten.map(sk => h('button', { class: 'am-menu-btn am-vb-row' + (lw(sk.naam) === x.v.soort ? ' am-on' : ''), onclick: () => lw(sk.naam) === x.v.soort ? M.close() : change('verband veranderd', `[[${b.it.title}]] | ${lw(sk.naam)}${tail}`) },
+          h('span', { class: 'am-vb-dot', style: `background:${sk.kleur}` }), (lw(sk.naam) === x.v.soort ? '✓ ' : '') + sk.naam)),
+        h('button', { class: 'am-menu-btn', onclick: () => change('verband omgedraaid', `[[${a.it.title}]] | ${x.v.soort}${tail}`, true) }, '⇄ Pijl omdraaien'),
+        h('button', { class: 'am-menu-btn am-vb-weg', onclick: () => change('verband weggehaald') }, 'Verband weghalen'),
+        h('button', { class: 'am-menu-btn', onclick: () => M.close() }, 'Annuleren'));
     };
     const linkMode = () => {
       link = {}; prodBox.hidden = true;
@@ -2340,7 +2425,8 @@ class ArchiefView extends ItemView {
           this.editing = { it, datum: it.datum, lijnen: [...it.lijnen], tags: [...it.tags], producten: [...it.producten], onbekend: [...it.onbekend], stroom: terug };
           this.render().then(() => { this.contentEl.scrollTop = 0; });
         } }, 'Bewerken') : null,
-        h('button', { class: 'am-menu-btn', onclick: linkMode }, 'Verband leggen')));
+        h('button', { class: 'am-menu-btn', onclick: linkMode }, 'Verband leggen'),
+        nv ? h('button', { class: 'am-menu-btn', onclick: () => vbList(best) }, `Verbanden · ${nv}`) : null));
       showProds(it);
       draw();
       // het item (en de producten erboven) in beeld houden
@@ -2351,9 +2437,31 @@ class ArchiefView extends ItemView {
         if (nv2.x !== v.x || nv2.y !== v.y) glideTo(nv2);
       });
     };
+    // alle foto's van een item schermvullend: vegen of op de zijkant tikken bladert, ✕ of omlaag vegen sluit
+    const groot = node => {
+      const mc = this.app.metadataCache, fs = [];
+      for (const e of (node.it.fc && node.it.fc.embeds) || []) { const t = mc.getFirstLinkpathDest(e.link.split('|')[0].split('#')[0], node.it.path); if (t && IMG_EXT.test(t.path) && !fs.includes(t)) fs.push(t); }
+      if (!fs.length) fs.push(node.img);
+      let i = Math.max(0, fs.indexOf(node.img)), x0 = null, y0 = 0;
+      const img = h('img', { class: 'am-groot-img', alt: '', draggable: false }), teller = h('span', { class: 'am-groot-n' });
+      const show = d => { i = (i + d + fs.length) % fs.length; img.src = this.app.vault.getResourcePath(fs[i]); teller.textContent = fs.length > 1 ? `${i + 1} / ${fs.length}` : ''; };
+      const G = h('div', { class: 'am-groot' }, img, h('div', { class: 'am-groot-top' }, h('span', { class: 'am-groot-t' }, node.it.title), teller, h('button', { class: 'am-tool', title: 'Sluiten', onclick: e => { e.stopPropagation(); G.remove(); } }, '✕')));
+      G.addEventListener('pointerdown', e => { x0 = e.clientX; y0 = e.clientY; });
+      G.addEventListener('pointerup', e => {
+        if (x0 == null || e.target.closest('button')) return;
+        const dx = e.clientX - x0, dy = e.clientY - y0; x0 = null;
+        if (Math.abs(dy) > 70 && Math.abs(dy) > Math.abs(dx)) return G.remove();
+        if (fs.length < 2) { if (Math.abs(dx) < 10 && Math.abs(dy) < 10) G.remove(); return; }
+        if (Math.abs(dx) > 40) show(dx < 0 ? 1 : -1);
+        else if (Math.abs(dx) < 10) show(e.clientX > G.getBoundingClientRect().width / 2 ? 1 : -1);
+      });
+      show(0); root.append(G);
+    };
     const pick = (px, py) => {
       const best = SP.hit(v, px, py);
       if (link) { if (best && best !== sel) { const a = sel; link = null; draw(); vbSheet(a, best); } return; }
+      // nog een keer tikken op het gekozen item: de foto's schermvullend
+      if (best && best === sel && best.img) return groot(best);
       pickNode(best);
     };
     // lijn trekken vanaf het gekozen item (alleen bij Verband leggen)
@@ -2379,6 +2487,7 @@ class ArchiefView extends ItemView {
         const f = this.app.vault.getAbstractFileByPath(n.it.path); if (!f) return;
         const keep = { ...v };
         try {
+          remember(`“${short(n.it.title, 20)}” verplaatst`, await snap([n.it.path, ...(E.plek.day || [])]));
           await this.app.fileManager.processFrontMatter(f, fm => {
             if (E.datum) fm.datum = E.datum;
             fm.project = E.lijnen.length > 1 ? E.lijnen : (E.lijnen[0] || '');
@@ -2388,8 +2497,7 @@ class ArchiefView extends ItemView {
           new Notice(`“${short(n.it.title, 30)}” verplaatst`); this.plugin.sync();
         } catch (e) { console.error(e); new Notice('Verplaatsen lukte niet: ' + (e && e.message || e), 8000); }
         // even wachten tot Obsidian de notitie opnieuw heeft gelezen, dan de stroom opnieuw tekenen op dezelfde plek
-        await new Promise(r => setTimeout(r, 700));
-        close(); this.data = await this.plugin.choices(); this.openStroom(keep);
+        await reopen(keep);
       }, { cx, cy, v: { ...v }, title: n.it.title, parent: root, idee: n.it.idee, img: n.img ? this.app.vault.getResourcePath(n.img) : '' });
     };
     this.panZoom(cv, () => v, nv => { v = nv; soon(); }, pick, KMIN, KMAX, (px, py, cx, cy) => link ? null : grab(px, py, cx, cy), grabLine);
@@ -2988,7 +3096,12 @@ class ArchiefView extends ItemView {
     const van = h('input', { type: 'date', class: 'am-filter', value: Z.van }), tot = h('input', { type: 'date', class: 'am-filter', value: Z.tot });
     const wis = h('button', { class: 'am-filter-x', onclick: () => { this.zoekF = null; this.shown = PAGE; this.render(); } }, 'Wissen');
     const count = h('p', { class: 'am-hint am-count' });
-    body.append(h('button', { class: 'am-stroom-open', onclick: () => this.openStroom() }, '〰 Stroom bekijken', h('small', {}, ' · of tik nog eens op Archief')), z, h('div', { class: 'am-filters' }, pSel, tSel), prods.length ? h('div', { class: 'am-filters' }, prSel) : null, h('div', { class: 'am-filters' }, h('label', { class: 'am-van' }, 'van', van), h('label', { class: 'am-van' }, 'tot', tot), wis), count);
+    // de filters zitten achter één knop, zodat de items meteen in beeld staan; het getal zegt hoeveel filters aan staan
+    const fBox = h('div', { class: 'am-filterbox' }, h('div', { class: 'am-filters' }, pSel, tSel), prods.length ? h('div', { class: 'am-filters' }, prSel) : null, h('div', { class: 'am-filters' }, h('label', { class: 'am-van' }, 'van', van), h('label', { class: 'am-van' }, 'tot', tot), wis));
+    const fBtn = h('button', { class: 'am-filter-btn', onclick: () => { this.filterOpen = !this.filterOpen; fLabel(); } });
+    const fLabel = () => { const n = ['project', 'tag', 'product', 'van', 'tot'].filter(k => Z[k]).length; fBtn.textContent = 'Filter' + (n ? ' · ' + n : ''); fBtn.classList.toggle('am-on', !!n || !!this.filterOpen); fBox.hidden = !this.filterOpen; };
+    fLabel();
+    body.append(h('button', { class: 'am-stroom-open', onclick: () => this.openStroom() }, '〰 Stroom bekijken', h('small', {}, ' · of tik nog eens op Archief')), h('div', { class: 'am-zoekrij' }, z, fBtn), fBox, count);
     const grid = h('div', { class: 'am-grid' }); body.append(grid);
     const more = h('button', { class: 'am-more' }, 'Meer laden'); body.append(more);
     // elk woord moet ergens passen: titel, een tag (#mag), een project, of de datum (2026-10, okt, 7 okt 2026)
@@ -3010,7 +3123,7 @@ class ArchiefView extends ItemView {
       more.onclick = () => { this.shown += PAGE; fill(); };
       if (top0 != null) { const dy = z.getBoundingClientRect().top - top0; if (Math.abs(dy) > 1) this.contentEl.scrollTop += dy; }
     };
-    const set = (k, v) => { Z[k] = v; this.shown = PAGE; fill(true); };
+    const set = (k, v) => { Z[k] = v; this.shown = PAGE; fill(true); fLabel(); };
     let tm; z.addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(() => set('q', z.value), 150); });
     pSel.addEventListener('change', () => set('project', pSel.value)); tSel.addEventListener('change', () => set('tag', tSel.value)); prSel.addEventListener('change', () => set('product', prSel.value));
     van.addEventListener('change', () => set('van', van.value)); tot.addEventListener('change', () => set('tot', tot.value));
@@ -3171,7 +3284,7 @@ class ArchiefView extends ItemView {
     for (let i = 0; i < 7; i++) { const x = addDay(ma, i); if (x > today) break; week.push([x, await P.werk(x)]); }
     const btn = h('button', { class: 'am-klok' + (run ? ' am-klok-aan' : '') }), sub = h('div', { class: 'am-klok-sub' });
     const upd = () => {
-      btn.textContent = run ? `⏹ Uitklokken · ${fmtDur(werkMin(run.d, [{ van: run.van, tot: '' }]))}` : '⏱ Inklokken';
+      btn.textContent = klokVergeten(run) ? '⏹ Vergeten uit te klokken?' : run ? `⏹ Uitklokken · ${fmtDur(werkMin(run.d, [{ van: run.van, tot: '' }]))}` : '⏱ Inklokken';
       const vd = week.find(([x]) => x === today), wm = week.reduce((n, [x, w]) => n + werkMin(x, w), 0);
       sub.textContent = (run ? `Ingeklokt sinds ${run.d === today ? '' : fmtD(run.d) + ' '}${run.van} · ` : '') + `vandaag ${fmtDur(vd ? werkMin(today, vd[1]) : 0)} · deze week ${fmtDur(wm)}`;
     };
@@ -3180,9 +3293,20 @@ class ArchiefView extends ItemView {
     if (run) this.klokTimer = setInterval(() => { if (!btn.isConnected) return clearInterval(this.klokTimer); upd(); }, 20000);
     btn.addEventListener('click', async () => {
       if (this.lbDirty && !confirm('Je notitie is nog niet bewaard. Toch in- of uitklokken? (de notitie blijft in het vak staan)')) return;
+      // vergeten uit te klokken: vragen tot hoe laat je werkte
+      let eind = '';
+      if (klokVergeten(run)) {
+        eind = await new Promise(res => {
+          let uit = null; const M = this.sheet('Vergeten uit te klokken?', () => res(uit));
+          const t = h('input', { type: 'time', class: 'am-klok-eind', value: eindGok(run.van) });
+          M.set(h('p', { class: 'am-hint' }, `De klok loopt nog sinds ${fmtD(run.d)} ${run.van}. Tot hoe laat werkte je toen?`), t,
+            h('button', { class: 'am-primary am-wide', onclick: () => { if (!/^\d\d:\d\d$/.test(t.value)) return t.focus(); uit = t.value; M.close(); } }, 'Bewaar eindtijd'));
+        });
+        if (!eind) return;
+      }
       btn.disabled = true;
       try {
-        const r = await P.klok(); new Notice(r.msg, r.dag ? 10000 : 4000);
+        const r = await P.klok(eind); new Notice(r.msg, r.dag ? 10000 : 4000);
         if (r.dag) { this.lbDirty = false; this.lbDag = r.dag; }
         P.sync(); setTimeout(again, 300);
       } catch (e) { console.error(e); new Notice('In- of uitklokken lukte niet: ' + (e && e.message || e), 8000); btn.disabled = false; }
