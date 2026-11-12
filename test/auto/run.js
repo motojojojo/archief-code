@@ -119,6 +119,20 @@ const deel = async (naam, fn) => { console.log('\n' + naam); try { await fn(); }
     await p.tap('.am-groot .am-tool'); await p.waitForTimeout(200); ok('sluiten gaat terug naar de stroom', !(await p.$('.am-groot')) && await gekozen() === 'Klei met textiel', `groot: ${!!(await p.$('.am-groot'))}, gekozen: ${await gekozen()}`);
     ok('geen fouten in de pagina', !errs.length, errs.join(' | ')); await ctx.close();
   });
+  await deel('Telefoon: plek kiezen in een zijtak', async () => {
+    const { ctx, p, errs } = await telefoon('iPhone 13 landscape');
+    // een verzonnen item dat al aan het idee hangt: daarnaast moet een nieuwe foto ook in de zijtak kunnen
+    await p.evaluate(() => PLUGIN.app.vault.adapter.write('Onderzoek/Klei aan touw.md', '---\ndatum: 2026-09-28\nproject: Testproject A\naan: "[[Idee hangende klei]]"\nkant: rechts\n---\nVerzonnen.\n'));
+    await p.evaluate(() => { window.NW = { datum: '2026-10-20' }; VIEW.pickPlek({ holder: NW, get: () => NW.datum, set: d => { NW.datum = d; }, skip: null }, [], () => {}); });
+    await p.waitForSelector('.am-plek canvas'); await p.waitForTimeout(700);
+    const q = await p.evaluate(() => { const d = VIEW.pDbg, n = d.SP.all.find(n => n.it.title === 'Klei aan touw'), v = d.v(), b = document.querySelector('.am-plek canvas').getBoundingClientRect(); return { x: b.left + v.x + (n.X + 60) * v.k, y: b.top + v.y + n.Y * v.k }; });
+    await p.touchscreen.tap(q.x, q.y); await p.waitForTimeout(400);
+    ok('na een item in de zijtak: blijft in de zijtak', /zijtak/.test(await p.textContent('.am-plek-info')));
+    await p.tap('.am-plek-acts .am-primary'); await p.waitForTimeout(300);
+    const pl = await p.evaluate(() => NW.plek);
+    ok('hangt aan het idee van die zijtak', !!pl && !!pl.hang && pl.hang.aan === 'Idee hangende klei' && pl.hang.kant === 'rechts', JSON.stringify(pl));
+    ok('geen fouten in de pagina', !errs.length, errs.join(' | ')); await ctx.close();
+  });
   await deel('Telefoon: stroom met 400 items, plaatjes onthouden', async () => {
     const { ctx, p, errs } = await telefoon('iPhone 13 landscape', '?groot=400');
     let groot = 0, urls = []; p.on('request', r => { if (/kluis\/.*\.(jpe?g|png)$/i.test(r.url())) { groot++; urls.push(decodeURIComponent(r.url().split('/').pop())); } });
