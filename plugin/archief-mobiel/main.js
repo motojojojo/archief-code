@@ -6,7 +6,7 @@ const { Plugin, ItemView, Notice, normalizePath, requestUrl } = require('obsidia
 const VIEW = 'archief-mobiel';
 // de versie van deze code zelf. Obsidian kan this.manifest al bijwerken na een sync terwijl de oude code nog draait,
 // daarom vergelijkt de ↻-knop manifest.json op schijf met dit getal (moet gelijk zijn aan manifest.json)
-const BUILD = '0.39.0';
+const BUILD = '0.39.1';
 // waar de nieuwste code staat: de ↻-knop haalt hem van GitHub (lukt dat niet, dan via Remotely Save zoals vroeger)
 const REPO = 'motojojojo/archief-code', REPO_DIR = 'plugin/archief-mobiel';
 const newerThan = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
@@ -2076,8 +2076,13 @@ class ArchiefView extends ItemView {
       const near = sides.filter(q => Math.abs(q.y - my) < Math.abs(r.y - my)).sort((p, q) => Math.abs(p.y - my) - Math.abs(q.y - my));
       for (const q of near) {
         let i = q.extra.findIndex(n => n.x >= mx); if (i < 0) i = q.extra.length;
-        const a = q.extra[i - 1] || null, anchor = a || q.from;
-        if (isIdee || anchor.it.idee) return { r: q, a, b: q.extra[i] || null, gx: gapX(q, i), side: true, anchor, kant: a ? 'rechts' : q.kant };
+        const a = q.extra[i - 1] || null, b = q.extra[i] || null, nb = a || b;
+        // net als in de visualisator: na een idee = rechts ervan; naast iets dat zelf ergens aan hangt = aan hetzelfde
+        let anchor = a || q.from, kant = a ? 'rechts' : q.kant;
+        if (!(a && a.it.idee && !(a.it.aanIt && a.it.kant === 'rechts')) && nb && nb.it.aanIt) { anchor = { it: nb.it.aanIt }; kant = nb.it.kant; }
+        // hangt de buurman niet aan een idee: dan aan het laatste idee links ervan in deze zijtak
+        if (!isIdee && !anchor.it.idee) { const e = q.extra.slice(0, i).reverse().find(n => n.it.idee) || (q.from.it.idee ? q.from : null); if (e) { anchor = e; kant = e === q.from ? q.kant : 'rechts'; } }
+        if (isIdee || anchor.it.idee) return { r: q, a, b, gx: gapX(q, i), side: true, anchor, kant };
       }
       let i = r.nodes.findIndex(n => n.x >= mx); if (i < 0) i = r.nodes.length;
       return { r, a: r.nodes[i - 1] || null, b: r.nodes[i] || null, gx: gapX(r, i) };
@@ -2099,6 +2104,7 @@ class ArchiefView extends ItemView {
       T = { r, a: r.nodes[i - 1] || null, b: r.nodes[i] || null, gx: gapX(r, i) };
     }
     let mk = { x: T.gx, y: T.gy ?? T.r.y };
+    this.pDbg = { SP, v: () => v, T: () => T }; // voor de tests
     const rr = (x, y, w, hh, rad) => { g.beginPath(); g.moveTo(x + rad, y); g.arcTo(x + w, y, x + w, y + hh, rad); g.arcTo(x + w, y + hh, x, y + hh, rad); g.arcTo(x, y + hh, x, y, rad); g.arcTo(x, y, x + w, y, rad); g.closePath(); };
     const draw = () => {
       const pr = SDPR();
