@@ -56,6 +56,22 @@ const deel = async (naam, fn) => { console.log('\n' + naam); try { await fn(); }
     ok('laadt 410 items', await p.evaluate(() => items.length) === 410);
     ok('geen fouten in de pagina', !errs.length, errs.join(' | ')); await p.close();
   });
+  for (const f of ['index.html', 'experiment.html']) await deel('Beeldbank: beelden uit je archief (' + f + ')', async () => {
+    const p = await b.newPage({ viewport: { width: 1440, height: 860 } }), errs = []; p.on('pageerror', e => errs.push(e.message));
+    await p.goto(`${URL0}visualisator.html?f=${f}`); await p.waitForFunction(() => typeof items !== 'undefined' && items.length >= 10, null, { timeout: 20000 }); await p.waitForTimeout(1500);
+    await p.click('#tabs [data-view="beeldbank"]'); await p.waitForTimeout(400);
+    const n0 = await p.evaluate(() => bankEntries.length);
+    await p.click('#bb-pick'); await p.click('[role=menuitem]:has-text("Uit je archief")'); await p.waitForTimeout(300);
+    await p.click('.bb-dumppick .ib >> nth=0'); await p.click('.bb-dumppick [data-dp="go"]');
+    await p.waitForFunction(n => bankEntries.length === n + 1, n0, { timeout: 10000 }).catch(() => {});
+    ok('beeld uit archief komt in de beeldbank', await p.evaluate(() => bankEntries.length) === n0 + 1);
+    ok('kopie heeft een eigen naam', await p.evaluate(() => bankEntries.some(e => / \(beeldbank\)\./.test(e.path))));
+    ok('items wijzen nog naar het origineel', await p.evaluate(() => !items.some(it => (it.imgs || []).some(im => im && im.entry && im.entry.path.startsWith('Beeldbank/')))));
+    await p.evaluate(() => document.getElementById('bb-pick').click()); await p.click('[role=menuitem]:has-text("Uit je archief")'); await p.waitForTimeout(300);
+    ok('al gekozen beeld staat als "al in beeldbank"', await p.$$eval('.bb-dumppick .ib.al', e => e.length) === 1);
+    await p.keyboard.press('Escape');
+    ok('geen fouten in de pagina', !errs.length, errs.join(' | ')); await p.close();
+  });
 
   // ---------- telefoon-plugin ----------
   const telefoon = async (dev, q = '') => { const ctx = await b.newContext({ ...devices[dev] }), p = await ctx.newPage(), errs = []; p.on('pageerror', e => errs.push(e.message)); await p.goto(`${URL0}plugin.html${q}`); await p.waitForFunction(() => window.VIEW && document.querySelector('.am-tabs'), null, { timeout: 20000 }); await p.waitForTimeout(600); return { ctx, p, errs }; };

@@ -475,6 +475,11 @@ body.dropping::after { content: "Laat los om in te laden"; position: fixed; inse
 .bb-dp-win { width: min(900px, 92vw); max-height: 84vh; overflow-y: auto; background: var(--bg); border: 1px solid var(--line-soft); border-radius: 8px; padding: 16px; }
 .bb-dp-head { position: sticky; top: -16px; z-index: 1; display: flex; align-items: center; gap: 10px; margin: -16px -16px 12px; padding: 12px 16px; background: var(--bg); border-bottom: 1px solid var(--line-soft); }
 .bb-dp-head span { flex: 1; font: 11px var(--mono); color: var(--muted); }
+.bb-dp-head input { width: 200px; }
+.bb-ap-it { margin: 0 0 14px; }
+.bb-ap-it h4 { margin: 0 0 6px; font: 12px var(--sans); color: var(--ink); } .bb-ap-it h4 small { color: var(--muted); font: 11px var(--mono); margin-left: 6px; }
+.bb-ap-it .inbox-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; }
+.bb-dumppick .ib.al { opacity: .35; cursor: default; } .bb-dumppick .ib.al::after { content: 'al in beeldbank'; position: absolute; left: 4px; bottom: 4px; font: 10px var(--mono); color: #fff; background: rgba(0,0,0,.7); padding: 1px 4px; border-radius: 3px; }
 .ib-new { color: var(--accent); }
 .ib-sec { margin-top: 30px; padding-top: 18px; border-top: 1px solid var(--line-soft); }
 #view-beeldbank.on { display: flex; }
@@ -3615,6 +3620,7 @@ function renderBankPanel() {
     menu(r.left, r.bottom + 4, 'Beelden toevoegen', [
       { icon: '⌂', label: 'Van je computer…', act: bankPickComputer },
       { icon: '⇩', label: dumpEntries.length ? `Uit Inladen (${dumpEntries.length})` : 'Uit Inladen (leeg)', act: bankFromDump },
+      { icon: '▦', label: 'Uit je archief…', act: bankFromArchief },
     ]);
   });
   async function bankPickComputer() {
@@ -3642,6 +3648,48 @@ function renderBankPanel() {
       else if (b && b.dataset.dp === 'go') { const list = dumpEntries.filter(x => sel.has(x.path)); close(); await dumpToBank(list); }
     });
     upd();
+  }
+  // beelden uit je onderzoek en ideeën kiezen: ze worden naar de beeldbank gekopieerd (het origineel blijft bij zijn item)
+  async function bankFromArchief() {
+    const M = await loadBankMeta(), al = new Set(Object.values(M.beelden).map(m => m.uit).filter(Boolean));
+    const its = items.map(it => ({ it, ims: (it.imgs || []).filter(im => im && im.entry && !im.video) })).filter(x => x.ims.length)
+      .sort((a, b) => (b.it.datum || '').localeCompare(a.it.datum || ''));
+    if (!its.length) return toast('Er staan nog geen beelden in je archief.');
+    const sel = new Map(), box = document.createElement('div'); box.className = 'bb-dumppick';
+    box.innerHTML = `<div class="bb-dp-win"><div class="bb-dp-head"><b>Uit je archief naar de beeldbank</b><input type="search" id="bb-ap-q" placeholder="zoek item, project of #tag"><span id="bb-dp-n"></span><button class="btn" data-dp="x">Annuleren</button><button class="btn primary" data-dp="go" disabled>Naar beeldbank</button></div>${its.map(({ it, ims }, k) => `<div class="bb-ap-it" data-api="${k}"><h4>${esc(it.title)}<small>${esc(fmtDate(it.datum) || '')}${it.lijnen && it.lijnen[0] ? ' · ' + esc(it.lijnen[0]) : ''}</small></h4><div class="inbox-grid">${ims.map((im, j) => `<button class="ib dump${al.has(im.entry.path) ? ' al' : ''}" data-dpp="${k}:${j}" title="${esc(base(im.entry.path))}"><img alt="" draggable="false" loading="lazy" src="${esc(im.thumb || '')}"><span class="ib-check"></span></button>`).join('')}</div></div>`).join('')}</div>`;
+    document.body.append(box);
+    const els = [...box.querySelectorAll('[data-dpp]')], secs = [...box.querySelectorAll('[data-api]')];
+    const upd = () => { for (const el of els) el.classList.toggle('on', sel.has(el.dataset.dpp)); const go = box.querySelector('[data-dp="go"]'); go.disabled = !sel.size; go.textContent = sel.size ? `Naar beeldbank (${sel.size})` : 'Naar beeldbank'; box.querySelector('#bb-dp-n').textContent = sel.size ? `${sel.size} gekozen` : 'klik op beelden om ze te kiezen'; };
+    const close = () => { box.remove(); document.removeEventListener('keydown', esc_); };
+    const esc_ = e => { if (e.key === 'Escape') close(); }; document.addEventListener('keydown', esc_);
+    box.querySelector('#bb-ap-q').addEventListener('input', e => {
+      const words = e.target.value.toLowerCase().split(/\s+/).filter(Boolean);
+      for (const el of secs) { const { it } = its[el.dataset.api], t = [it.title, it.datum, ...(it.lijnen || []), ...(it.tags || []).map(x => '#' + x)].join(' ').toLowerCase(); el.hidden = !words.every(w => t.includes(w)); }
+    });
+    box.addEventListener('click', async e => {
+      const t = e.target.closest('[data-dpp]'), b = e.target.closest('[data-dp]');
+      if (t) { if (t.classList.contains('al')) return; const [k, j] = t.dataset.dpp.split(':').map(Number); sel.has(t.dataset.dpp) ? sel.delete(t.dataset.dpp) : sel.set(t.dataset.dpp, { it: its[k].it, im: its[k].ims[j] }); upd(); }
+      else if (b && b.dataset.dp === 'x' || e.target === box) close();
+      else if (b && b.dataset.dp === 'go') { const list = [...sel.values()]; close(); await archiefToBank(list); }
+    });
+    upd(); box.querySelector('#bb-ap-q').focus();
+  }
+  async function archiefToBank(list) {
+    if (!list.length) return;
+    if (!await canWrite(() => archiefToBank(list))) return;
+    try {
+      const dir = await dirAt(BANK_DIR, true), M = await loadBankMeta(), today = isoDay(Date.now());
+      bankSel.clear();
+      for (const [i, { it, im }] of list.entries()) {
+        setStatus(`Beeldbank ${i + 1} / ${list.length}…`);
+        const n0 = base(im.entry.path), dot = n0.lastIndexOf('.'), name = await uniqueName(dir, (dot > 0 ? n0.slice(0, dot) : n0) + ' (beeldbank)' + (dot > 0 ? n0.slice(dot) : ''));  // eigen naam, anders gaat de link in het item naar de kopie wijzen
+        await writeTo(dir, name, im.entry.file);
+        M.beelden[name] = { datum: it.datum || today, bron: it.title, notitie: '', tags: [], uit: im.entry.path }; bankSel.add(BANK_DIR + '/' + name);
+      }
+      await saveBankMeta(true);
+      lastSig = ''; await loadFromHandle(false);
+      toast(`${list.length} beeld${list.length === 1 ? '' : 'en'} uit je archief in de beeldbank. Het origineel blijft bij het item.`);
+    } catch (err) { console.error(err); alert('Naar de beeldbank zetten lukte niet: ' + err.message); }
   }
   $('#bb-input').addEventListener('change', e => { const f = [...e.target.files]; e.target.value = ''; bankAdd(f, ''); });
 })();
