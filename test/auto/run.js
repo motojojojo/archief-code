@@ -128,6 +128,31 @@ const deel = async (naam, fn) => { console.log('\n' + naam); try { await fn(); }
     ok('de binnenste box ligt er nog helemaal in', r.erin);
     ok('geen fouten in de pagina', !errs.length, errs.join(' | ')); await p.close();
   });
+  await deel('Beeldbank: bord, geen beelden in de hoek, boxen duwen elkaar', async () => {
+    const p = await b.newPage({ viewport: { width: 1440, height: 860 } }), errs = []; p.on('pageerror', e => errs.push(e.message));
+    await p.goto(`${URL0}visualisator.html`); await p.waitForFunction(() => typeof items !== 'undefined' && items.length >= 10, null, { timeout: 20000 }); await p.waitForTimeout(1500);
+    await p.click('#tabs [data-view="beeldbank"]'); await p.waitForTimeout(1500);
+    // helemaal uitzoomen: het hele bord past precies in beeld, niet verder
+    const z = await p.evaluate(async () => { skyZoom(0.0001); await new Promise(r => setTimeout(r, 300)); const g = document.getElementById('bb-grid').getBoundingClientRect(), d = document.getElementById('bb-bord').getBoundingClientRect(); return { past: d.left >= g.left - 1 && d.right <= g.right + 1 && d.top >= g.top - 1 && d.bottom <= g.bottom + 1, vult: d.width >= g.width * .95 || d.height >= g.height * .95 }; });
+    ok('uitgezoomd past het hele bord precies in beeld', z.past && z.vult);
+    // opnieuw opbouwen terwijl er een beeld groot open staat: geen beeldjes in de hoek
+    const hoek = await p.evaluate(async () => { const k = bankEntries[0].path; bankSel.clear(); bankSel.add(k); await renderBeeldbank(); const n = sky.els.filter(e => !/translate3d/.test(e.style.transform)).length; bankSel.clear(); await renderBeeldbank(); return n; });
+    ok('opnieuw opbouwen met een beeld open: alle beeldjes hebben een plek', hoek === 0);
+    // een ongeldige plek wordt hersteld en het beeld is weer te slepen
+    ok('ongeldige plek wordt hersteld', await p.evaluate(async () => { const s = [...sky.st.values()][0]; s.x = NaN; s.vx = NaN; await new Promise(r => setTimeout(r, 300)); return isFinite(s.x) && [...sky.st.values()].every(t => isFinite(t.x) && isFinite(t.y)); }));
+    // een box over een andere heen leggen: ze schuiven uit elkaar, en wat erin ligt gaat mee
+    const d = await p.evaluate(() => {
+      const M = bankMeta; M.boxes.push({ id: 'b2', naam: 'Tweede', x: .5, y: .5, w: .2, h: .2 }); skyBoxes();
+      const a = M.boxes.find(b => b.id === 'testbox1'), c = M.boxes.find(b => b.id === 'b2'); c.x = a.x + a.w * .5; c.y = a.y + a.h * .3;
+      const lid = [...sky.st.values()].find(s => s.box === 'testbox1'), x0 = lid.x, ax0 = a.x;
+      boxDuw(c, true);
+      const A = boxPx(a), C = boxPx(c), ov = Math.min(A.x + A.w, C.x + C.w) > Math.max(A.x, C.x) && Math.min(A.y + A.h, C.y + C.h) > Math.max(A.y, C.y);
+      return { ov, meeLid: a.x !== ax0 ? lid.x !== x0 : true };
+    });
+    ok('boxen over elkaar schuiven uit elkaar', !d.ov);
+    ok('de beelden in een weggeduwde box gaan mee', d.meeLid);
+    ok('geen fouten in de pagina', !errs.length, errs.join(' | ')); await p.close();
+  });
   await deel('Visualisator: verversknop', async () => {
     const p = await b.newPage({ viewport: { width: 1440, height: 860 } }), errs = []; p.on('pageerror', e => errs.push(e.message));
     await p.goto(`${URL0}visualisator.html`); await p.waitForFunction(() => typeof items !== 'undefined' && items.length >= 10, null, { timeout: 20000 }); await p.waitForTimeout(1500);

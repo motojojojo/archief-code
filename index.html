@@ -490,7 +490,8 @@ body[data-view="ideeen"] #side, body[data-view="beeldbank"] #side, body[data-vie
 #view-beeldbank .bb-main { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0; }
 #bb-grid { display: block; position: relative; flex: 1; min-height: 0; margin: 0 -20px; overflow: hidden; cursor: grab; touch-action: none; user-select: none; }
 #bb-grid.panning { cursor: grabbing; }
-#bb-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; border-radius: 24px; background-image: radial-gradient(var(--line-soft) 1px, transparent 1.5px); background-size: 48px 48px; }
+#bb-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+#bb-bord { position: absolute; border-radius: 24px; background-image: radial-gradient(var(--line-soft) 1px, transparent 1.5px); background-size: 48px 48px; border: 1px solid var(--line-soft); pointer-events: none; }
 #bb-grid .bb { cursor: pointer; overflow: visible; }
 #bb-grid .bb img { border-radius: 8px; }
 #bb-grid .bb.dragging { opacity: 1 !important; z-index: 5; cursor: grabbing; }
@@ -3066,7 +3067,7 @@ async function renderBeeldbank() {
   $('#bb-tagclear').hidden = !bankTag;
   const list = bankList();
   $('#bb-count').textContent = list.length === bankEntries.length ? `${list.length} beeld${list.length === 1 ? '' : 'en'}` : `${list.length} van ${bankEntries.length} beelden`;
-  $('#bb-world').innerHTML = '<div id="bb-boxes"></div>' + list.map(x => `<button class="ib bb${bankSel.has(x.e.path) ? ' on' : ''}" data-bb="${esc(x.e.path)}" title="${esc(x.m.notitie || x.n)}"><img alt="" draggable="false">${annSvg(x.m)}<span class="ib-meta"><span>${esc(fmtDate(x.m.datum))}</span><span class="bb-mt">${esc(x.m.tags.map(t => '#' + t).join(' '))}</span></span></button>`).join('')
+  $('#bb-world').innerHTML = '<div id="bb-bord"></div><div id="bb-boxes"></div>' + list.map(x => `<button class="ib bb${bankSel.has(x.e.path) ? ' on' : ''}" data-bb="${esc(x.e.path)}" title="${esc(x.m.notitie || x.n)}"><img alt="" draggable="false">${annSvg(x.m)}<span class="ib-meta"><span>${esc(fmtDate(x.m.datum))}</span><span class="bb-mt">${esc(x.m.tags.map(t => '#' + t).join(' '))}</span></span></button>`).join('')
     || `<p class="bb-none">${bankEntries.length ? 'Niets gevonden.' : ''}</p>`;
   const els = $$('#bb-grid .bb'); list.forEach((x, i) => { const img = els[i].querySelector('img'); img.onload = () => skyFit(els[i], img); thumbFor(x.e).then(u => { img.src = u || fullFor(x.e); }); });
   skySetup(els);
@@ -3105,6 +3106,8 @@ function skySetup(els) {
     }
     st.box = inBox; st.hover = false; st.drag = false; skySize(el, st);
     st.wacht = !!(sky.wacht && sky.wacht.has(el.dataset.bb)); el.style.visibility = st.wacht ? 'hidden' : '';
+    if (!isFinite(st.x) || !isFinite(st.y)) { st.x = Math.random() * Math.max(1, WW - st.w); st.y = Math.random() * Math.max(1, WH - st.h); st.vx = st.vy = 0; }
+    el.style.transform = `translate3d(${st.x.toFixed(1)}px,${st.y.toFixed(1)}px,0)`; // ook als het zweven even stilstaat (bijv. met een beeld groot open)
   }
   skyBoxes();
   if (sky.wacht && sky.wacht.size) plaatsStart(); else plaatsStop();
@@ -3113,14 +3116,23 @@ function skySetup(els) {
   skyApply();
   if (bankTag) skyGather(bankTag, true); else skyStart();
 }
-function skySize(el, st) { const D = sky.D * st.z; const q = Math.sqrt(Math.max(.4, Math.min(2.5, st.ar))); st.w = D * q; st.h = st.w / st.ar; el.style.width = st.w + 'px'; el.style.height = st.h + 'px'; }
+function skySize(el, st) { if (!(st.ar > 0) || !isFinite(st.ar)) st.ar = 1; const D = sky.D * st.z; const q = Math.sqrt(Math.max(.4, Math.min(2.5, st.ar))); st.w = D * q; st.h = st.w / st.ar; el.style.width = st.w + 'px'; el.style.height = st.h + 'px'; }
 function skyFit(el, img) { const st = sky.st.get(el.dataset.bb); if (!st || !img.naturalWidth) return; st.ar = img.naturalWidth / img.naturalHeight; skySize(el, st); if (st.tx != null && sky.gather) skyGather(bankTag, true); }
 function skyApply() { const v = sky.v; $('#bb-world').style.transform = `translate(${v.x.toFixed(1)}px,${v.y.toFixed(1)}px) scale(${v.k.toFixed(4)})`; }
-function skyKFit() { const box = $('#bb-grid'); return Math.min(box.clientWidth / sky.WW, box.clientHeight / sky.WH) * .96; }
+// het bord: het vlak plus alle boxen (die mogen uitsteken), met wat ruimte eromheen
+function skyBord() {
+  const F = { x0: 0, y0: 0, x1: sky.WW, y1: sky.WH }, M = sky.D * .8;
+  for (const b of bankBoxes()) { const r = boxPx(b); F.x0 = Math.min(F.x0, r.x - M); F.y0 = Math.min(F.y0, r.y - M); F.x1 = Math.max(F.x1, r.x + r.w + M); F.y1 = Math.max(F.y1, r.y + r.h + M); }
+  const el = $('#bb-bord'); if (el) { const css = `left:${F.x0.toFixed(0)}px;top:${F.y0.toFixed(0)}px;width:${(F.x1 - F.x0).toFixed(0)}px;height:${(F.y1 - F.y0).toFixed(0)}px`; if (el.dataset.css !== css) { el.style.cssText = css; el.dataset.css = css; } }
+  return sky.F = F;
+}
+function skyKFit() { const box = $('#bb-grid'), F = sky.F || skyBord(); return Math.min(box.clientWidth / (F.x1 - F.x0), box.clientHeight / (F.y1 - F.y0)) * .98; }
+// helemaal uitgezoomd: het hele bord past precies in beeld, in het midden
+function skyFitView() { const g = $('#bb-grid'), F = sky.F || skyBord(), k = skyKFit(); return { x: (g.clientWidth - (F.x1 + F.x0) * k) / 2, y: (g.clientHeight - (F.y1 + F.y0) * k) / 2, k }; }
 function skyZoom(nk, mx, my, smooth) {
   const box = $('#bb-grid'), v = sky.vt || sky.v; if (mx == null) { mx = box.clientWidth / 2; my = box.clientHeight / 2; }
-  nk = Math.max(Math.min(.15, skyKFit() * .8), Math.min(3, nk));
-  const wx = (mx - v.x) / v.k, wy = (my - v.y) / v.k, t = { x: mx - wx * nk, y: my - wy * nk, k: nk };
+  const kmin = skyKFit(); nk = Math.max(kmin, Math.min(3, nk));
+  const wx = (mx - v.x) / v.k, wy = (my - v.y) / v.k, t = nk <= kmin + 1e-4 ? skyFitView() : { x: mx - wx * nk, y: my - wy * nk, k: nk };
   if (smooth && !skyStill()) { sky.vt = t; skyStart(); } else { sky.vt = null; sky.v = t; skyApply(); }
 }
 function skyGather(tag, keep) {
@@ -3136,6 +3148,40 @@ function skyGather(tag, keep) {
   sky.gather = { cx, cy, rx: gw / 2 + 50, ry: gh / 2 + 50 };
   if (!keep && W && (gw * v.k > W * .86 || gh * v.k > H * .8)) skyZoom(Math.min(W * .86 / gw, H * .8 / gh), W / 2, H / 2, true);
   skyStart();
+}
+function boxStijl(b) { const el = $('#bb-boxes')?.querySelector(`[data-box="${CSS.escape(b.id)}"]`), r = boxPx(b); if (el) { Object.assign(el.style, { left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px' }); el.style.setProperty('--bf', boxFont(r) + 'px'); } }
+// boxen die over elkaar liggen (en niet in elkaar) schuiven uit elkaar; de box die je zelf vastpakt blijft staan.
+// Een box neemt de boxen en beelden die erin liggen mee. Ligt hij in een grotere box, dan blijft hij daarin (die groeit dan mee)
+function boxDuw(vast, groteOok) {
+  const bs = bankBoxes(); if (bs.length < 2 || !sky.WW) return false;
+  const ouder = new Map(bs.map(b => [b.id, bs.filter(o => o !== b && boxIn(b, o)).sort((x, y) => x.w * x.h - y.w * y.h)[0] || null]));
+  const fam = b => bs.filter(o => o === b || boxIn(o, b)), gap = 16;
+  const eigen = b => vast && fam(b).includes(vast);
+  let iets = false;
+  for (let pass = 0; pass < 8; pass++) {
+    let nu = false;
+    for (let i = 0; i < bs.length; i++) for (let j = i + 1; j < bs.length; j++) {
+      const a = bs[i], c = bs[j];
+      if (ouder.get(a.id) !== ouder.get(c.id) || boxIn(a, c) || boxIn(c, a)) continue;
+      const A = boxPx(a), C = boxPx(c), ox = Math.min(A.x + A.w, C.x + C.w) - Math.max(A.x, C.x) + gap, oy = Math.min(A.y + A.h, C.y + C.h) - Math.max(A.y, C.y) + gap;
+      if (!(ox > 0 && oy > 0)) continue;
+      let m = c, o = a; if (eigen(c)) { m = a; o = c; } if (eigen(m)) continue;
+      // tijdens het verslepen geen grotere box wegduwen: dan kun je een box nog ergens in leggen
+      if (vast && !groteOok && m.w * m.h > vast.w * vast.h) continue;
+      const M = boxPx(m), O = boxPx(o); let dx = 0, dy = 0;
+      if (ox < oy) dx = M.x + M.w / 2 < O.x + O.w / 2 ? -ox : ox; else dy = M.y + M.h / 2 < O.y + O.h / 2 ? -oy : oy;
+      const f = fam(m), ids = new Set(f.map(x => x.id));
+      for (const x of f) { x.x += dx / sky.WW; x.y += dy / sky.WH; boxStijl(x); }
+      for (const st of sky.st.values()) if (ids.has(st.box)) { st.x += dx; st.y += dy; }
+      // in een grotere box gebleven? anders groeit die mee
+      const P = ouder.get(m.id);
+      if (P) { const x0 = Math.min(P.x, m.x - 10 / sky.WW), y0 = Math.min(P.y, m.y - 24 / sky.WH), x1 = Math.max(P.x + P.w, m.x + m.w + 10 / sky.WW), y1 = Math.max(P.y + P.h, m.y + m.h + 10 / sky.WH); if (x0 < P.x || y0 < P.y || x1 > P.x + P.w || y1 > P.y + P.h) { P.x = x0; P.y = y0; P.w = x1 - x0; P.h = y1 - y0; boxStijl(P); } }
+      nu = iets = true;
+    }
+    if (!nu) break;
+  }
+  if (iets) for (const b of bs) for (const k of ['x', 'y', 'w', 'h']) b[k] = +b[k].toFixed(5);
+  return iets;
 }
 function boxGroei() {
   const bs = bankBoxes(); if (!bs.length || !sky.WW) return false;
@@ -3153,24 +3199,24 @@ function boxGroei() {
     for (const c of kids) { w = Math.max(w, c.x + c.w - b.x + 14 / sky.WW); h = Math.max(h, c.y + c.h - b.y + 14 / sky.WH); }
     if (w > b.w + 1e-4 || h > b.h + 1e-4) { b.w = +w.toFixed(5); b.h = +h.toFixed(5); groei = true; }
   }
-  if (groei) { saveBankMeta(); skyBoxes(); }
+  if (groei) { boxDuw(null, true); saveBankMeta(); skyBoxes(); }
   return groei;
 }
 function skyBots(dt) {
   const list = [], cs = sky.D * 1.8, cel = new Map();
-  for (const el of sky.els) { const s = sky.st.get(el.dataset.bb); if (s && !s.wacht && s.tx == null) list.push(s); }
+  for (const el of sky.els) { const s = sky.st.get(el.dataset.bb); if (s && !s.wacht && s.tx == null && isFinite(s.x + s.y + s.w + s.h)) { s._i = list.length; list.push(s); } }
   for (const s of list) { const k = Math.floor(s.x / cs) + ',' + Math.floor(s.y / cs); (cel.get(k) || cel.set(k, []).get(k)).push(s); }
   const gap = 6, mag = s => !s.drag && !s.hover; let busy = false;
   for (const a of list) {
     const gx = Math.floor(a.x / cs), gy = Math.floor(a.y / cs);
     for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const b of cel.get((gx + i) + ',' + (gy + j)) || []) {
-      if (b === a || (a.box || null) !== (b.box || null) || !(a.x < b.x || (a.x === b.x && a.y < b.y))) continue;
+      if (b._i <= a._i || (a.box || null) !== (b.box || null)) continue;
       const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) + gap, oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) + gap;
-      if (ox <= 0 || oy <= 0) continue;
+      if (!(ox > 0 && oy > 0)) continue;
       const fa = mag(a), fb = mag(b); if (!fa && !fb) continue;
       const wa = fa && fb ? .5 : fa ? 1 : 0, wb = 1 - wa;
       if (ox < oy) {
-        const sg = a.x + a.w / 2 < b.x + b.w / 2 ? -1 : 1, p = Math.min(ox, dt * 220 + Math.abs((a.vx || 0) - (b.vx || 0)) * dt);
+        const sg = a.x + a.w / 2 < b.x + b.w / 2 || (a.x === b.x && a._i % 2) ? -1 : 1, p = Math.min(ox, dt * 220 + Math.abs((a.vx || 0) - (b.vx || 0)) * dt);
         a.x += sg * p * wa; b.x -= sg * p * wb;
         // stoten: de snelheid langs die richting wisselt (met wat verlies), en de zweefrichting draait om
         if (((b.vx || 0) - (a.vx || 0)) * -sg < 0 || a.vx || b.vx) { const av = a.vx || 0, bv = b.vx || 0; if (fa) a.vx = fb ? bv * .8 : sg * Math.abs(av) * .7; if (fb) b.vx = fa ? av * .8 : -sg * Math.abs(bv) * .7; }
@@ -3222,14 +3268,14 @@ function skyTick(now) {
   const WW = sky.WW, WH = sky.WH, dt = Math.min(.05, (now - sky.last) / 1000), t = now / 1000, still = skyStill(), G = sky.gather; sky.last = now;
   const BX = new Map(bankBoxes().map(b => [b.id, boxPx(b)]));
   const BR = new Map(bankBoxes().map(b => [b.id, b]));
-  const F = { x0: 0, y0: 0, x1: WW, y1: WH }, FM = sky.D * .8;
-  for (const b of BX.values()) { F.x0 = Math.min(F.x0, b.x - FM); F.y0 = Math.min(F.y0, b.y - FM); F.x1 = Math.max(F.x1, b.x + b.w + FM); F.y1 = Math.max(F.y1, b.y + b.h + FM); }
+  const F = skyBord();
   if (sky.vt) { const v = sky.v, q = Math.min(1, dt * 6); v.x += (sky.vt.x - v.x) * q; v.y += (sky.vt.y - v.y) * q; v.k += (sky.vt.k - v.k) * q; if (Math.abs(sky.vt.k - v.k) < .002 && Math.abs(sky.vt.x - v.x) < .5) { sky.v = sky.vt; sky.vt = null; } }
   skyApply();
   let busy = !!sky.vt;
   if (!still && skyBots(dt)) busy = true;
   for (const el of sky.els) {
     const s = sky.st.get(el.dataset.bb); if (!s || s.wacht) continue;
+    if (!isFinite(s.x) || !isFinite(s.y) || !isFinite(s.vx || 0) || !isFinite(s.vy || 0) || !isFinite(s.a)) { s.x = F.x0 + Math.random() * (F.x1 - F.x0 - s.w); s.y = F.y0 + Math.random() * (F.y1 - F.y0 - s.h); s.vx = s.vy = 0; s.a = Math.random() * 6.283; s.drag = false; }
     let r = 0, o = 1;
     if (s.drag) { /* de muis bepaalt de plek */ }
     else if (s.tx != null) {
@@ -3300,7 +3346,7 @@ function boxMake(r) {
     // alleen overnemen als de nieuwe box er binnenin ligt (niet een kleinere box leegroven)
     if (cx > r.x && cx < r.x + r.w && cy > r.y && cy < r.y + r.h && (!cur || cur.w * cur.h > b.w * b.h)) { st.box = b.id; bankOf(e).box = b.id; }
   }
-  saveBankMeta(); skyBoxes(); skyStart();
+  boxDuw(b, true); saveBankMeta(); skyBoxes(); skyStart();
   toast('Box gemaakt. Dubbelklik op de naam om hem een naam te geven; sleep beelden erin of eruit.');
 }
 (() => {
@@ -3324,7 +3370,7 @@ function boxMake(r) {
       end = () => { d.remove(); if (r && r.w > 80 && r.h > 80) boxMake(r); };
     } else if (e.button !== 0) return;
     else if (tile) {
-      const st = sky.st.get(tile.dataset.bb); if (!st) return; let moved = false; const ox = wx - st.x, oy = wy - st.y, hist = [];
+      const st = sky.st.get(tile.dataset.bb); if (!st) return; if (!isFinite(st.x) || !isFinite(st.y)) { st.x = wx - st.w / 2; st.y = wy - st.h / 2; } let moved = false; const ox = wx - st.x, oy = wy - st.y, hist = [];
       mv = ev => {
         if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 5) return;
         if (!moved) { moved = true; st.drag = true; st.tx = null; st.vx = st.vy = 0; tile.classList.add('dragging'); try { grid.setPointerCapture(e.pointerId); } catch (er) {} }
@@ -3366,9 +3412,10 @@ function boxMake(r) {
           for (const st of sky.st.values()) if (ids.has(st.box)) { st.x += dx - ldx; st.y += dy - ldy; }
           ldx = dx; ldy = dy;
         }
-        const r = boxPx(b); Object.assign(bxEl.style, { left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px' }); bxEl.style.setProperty('--bf', boxFont(r) + 'px'); skyStart();
+        const r = boxPx(b); Object.assign(bxEl.style, { left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px' }); bxEl.style.setProperty('--bf', boxFont(r) + 'px');
+        boxDuw(b, rs); skyStart();
       };
-      end = () => { for (const x of [b, ...kids.map(k => k.b)]) for (const k of ['x', 'y', 'w', 'h']) x[k] = +x[k].toFixed(5); saveBankMeta(); };
+      end = () => { for (const x of [b, ...kids.map(k => k.b)]) for (const k of ['x', 'y', 'w', 'h']) x[k] = +x[k].toFixed(5); boxDuw(b, true); boxGroei(); saveBankMeta(); skyBoxes(); }; // bij loslaten ook grotere boxen opzij (tenzij hij er helemaal in ligt)
     } else {
       // leeg stuk: het vlak schuiven
       const x0 = e.clientX, y0 = e.clientY, v0 = { ...sky.v }; sky.vt = null; grid.classList.add('panning');
@@ -3398,7 +3445,7 @@ function boxMake(r) {
   });
   grid.querySelector('.toolbar').addEventListener('click', e => {
     const b = e.target.closest('[data-bz]'); if (!b) return; const v = sky.vt || sky.v;
-    if (b.dataset.bz === 'fit') { const k = skyKFit(); sky.vt = { x: (grid.clientWidth - sky.WW * k) / 2, y: (grid.clientHeight - sky.WH * k) / 2, k }; if (skyStill()) { sky.v = sky.vt; sky.vt = null; skyApply(); } else skyStart(); }
+    if (b.dataset.bz === 'fit') { sky.vt = skyFitView(); if (skyStill()) { sky.v = sky.vt; sky.vt = null; skyApply(); } else skyStart(); }
     else skyZoom(v.k * (b.dataset.bz === 'in' ? 1.4 : 1 / 1.4), null, null, true);
   });
 })();
