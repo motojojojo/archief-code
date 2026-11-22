@@ -101,6 +101,33 @@ const deel = async (naam, fn) => { console.log('\n' + naam); try { await fn(); }
     ok('na de klik staan ze er', await p.evaluate(() => !sky.wacht && !document.getElementById('bb-plaats') && !sky.els.some(e => e.style.visibility === 'hidden')));
     ok('geen fouten in de pagina', !errs.length, errs.join(' | ')); await p.close();
   });
+  await deel('Beeldbank: niet vastlopen, volle box groeit (ook box in box)', async () => {
+    const p = await b.newPage({ viewport: { width: 1440, height: 860 } }), errs = []; p.on('pageerror', e => errs.push(e.message));
+    await p.goto(`${URL0}visualisator.html`); await p.waitForFunction(() => typeof items !== 'undefined' && items.length >= 10, null, { timeout: 20000 }); await p.waitForTimeout(1500);
+    await p.click('#tabs [data-view="beeldbank"]'); await p.waitForTimeout(1500);
+    // een grote box die bijna het hele vlak vult (zoals bij Milo): losse beelden mogen niet klem komen te zitten
+    const k = await p.evaluate(() => {
+      const M = bankMeta; M.boxes.push({ id: 'groot', naam: 'Groot', x: .15, y: -.05, w: .7, h: 1.1 }); skyBoxes();
+      const k = [...sky.st].find(([, s]) => !s.box)[0], s = sky.st.get(k); s.x = .5 * sky.WW; s.y = -.05 * sky.WH - s.h - 10; s.a = Math.PI / 2; s.vx = s.vy = 0; window.__k = k; window.__p0 = [s.x, s.y]; return k;
+    });
+    await p.waitForTimeout(6000);
+    ok('los beeld naast een grote box zweeft door (loopt niet vast)', await p.evaluate(() => { const s = sky.st.get(__k); return Math.hypot(s.x - __p0[0], s.y - __p0[1]) > 50; }));
+    // box in een box: de binnenste vol maken, dan groeien ze allebei en blijft de binnenste erin
+    const r = await p.evaluate(() => {
+      const M = bankMeta; M.boxes = M.boxes.filter(b => b.id !== 'groot');
+      M.boxes.push({ id: 'buiten', naam: 'Buiten', x: .55, y: .55, w: .2, h: .2 }, { id: 'binnen', naam: 'Binnen', x: .56, y: .58, w: .17, h: .15 }); skyBoxes();
+      const vrij = [...sky.st].filter(([, s]) => !s.box).slice(0, 4), B = boxPx(M.boxes.find(b => b.id === 'binnen'));
+      for (const [k, s] of vrij) { s.box = 'binnen'; s.x = B.x + 10; s.y = B.y + 20; const e = bankEntries.find(x => x.path === k); bankOf(e).box = 'binnen'; }
+      const w0 = { bi: M.boxes.find(b => b.id === 'binnen').w, bu: M.boxes.find(b => b.id === 'buiten').w };
+      boxGroei();
+      const bi = M.boxes.find(b => b.id === 'binnen'), bu = M.boxes.find(b => b.id === 'buiten');
+      return { groeiBinnen: bi.w > w0.bi, groeiBuiten: bu.w > w0.bu, erin: boxIn(bi, bu) };
+    });
+    ok('volle box groeit', r.groeiBinnen);
+    ok('de buitenste box groeit mee', r.groeiBuiten);
+    ok('de binnenste box ligt er nog helemaal in', r.erin);
+    ok('geen fouten in de pagina', !errs.length, errs.join(' | ')); await p.close();
+  });
   await deel('Visualisator: verversknop', async () => {
     const p = await b.newPage({ viewport: { width: 1440, height: 860 } }), errs = []; p.on('pageerror', e => errs.push(e.message));
     await p.goto(`${URL0}visualisator.html`); await p.waitForFunction(() => typeof items !== 'undefined' && items.length >= 10, null, { timeout: 20000 }); await p.waitForTimeout(1500);

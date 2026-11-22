@@ -3108,6 +3108,7 @@ function skySetup(els) {
   }
   skyBoxes();
   if (sky.wacht && sky.wacht.size) plaatsStart(); else plaatsStop();
+  setTimeout(boxGroei, 600); // na het laden van de plaatjes (dan kloppen de maten)
   if (!sky.placed && box.clientWidth) { sky.placed = true; sky.v = { x: (W - WW) / 2, y: (H - WH) / 2, k: 1 }; }
   skyApply();
   if (bankTag) skyGather(bankTag, true); else skyStart();
@@ -3135,6 +3136,25 @@ function skyGather(tag, keep) {
   sky.gather = { cx, cy, rx: gw / 2 + 50, ry: gh / 2 + 50 };
   if (!keep && W && (gw * v.k > W * .86 || gh * v.k > H * .8)) skyZoom(Math.min(W * .86 / gw, H * .8 / gh), W / 2, H / 2, true);
   skyStart();
+}
+function boxGroei() {
+  const bs = bankBoxes(); if (!bs.length || !sky.WW) return false;
+  const diep = b => bs.filter(o => o !== b && boxIn(b, o)).length, orde = bs.map(b => ({ b, d: diep(b) })).sort((x, y) => y.d - x.d);
+  const kind = new Map(bs.map(b => [b.id, bs.filter(c => c !== b && boxIn(c, b) && !bs.some(o => o !== b && o !== c && boxIn(c, o) && boxIn(o, b)))]));
+  let groei = false;
+  for (const { b } of orde) {
+    const kids = kind.get(b.id), r = boxPx(b);
+    let nodig = 0; for (const st of sky.st.values()) if (st.box === b.id && !st.wacht) nodig += (st.w + 14) * (st.h + 14);
+    for (const c of kids) { const q = boxPx(c); nodig += (q.w + 20) * (q.h + 20); }
+    const ruimte = Math.max(1, (r.w - 16) * (r.h - 26)), vol = .6;
+    let w = b.w, h = b.h;
+    if (nodig / vol > ruimte) { const f = Math.sqrt(nodig / vol / ruimte); w = b.w * f; h = b.h * f; }
+    // de boxen die erin liggen moeten er helemaal in blijven passen
+    for (const c of kids) { w = Math.max(w, c.x + c.w - b.x + 14 / sky.WW); h = Math.max(h, c.y + c.h - b.y + 14 / sky.WH); }
+    if (w > b.w + 1e-4 || h > b.h + 1e-4) { b.w = +w.toFixed(5); b.h = +h.toFixed(5); groei = true; }
+  }
+  if (groei) { saveBankMeta(); skyBoxes(); }
+  return groei;
 }
 function skyBots(dt) {
   const list = [], cs = sky.D * 1.8, cel = new Map();
@@ -3187,6 +3207,7 @@ function plaatsHier(wx, wy) {
     if (m && (m.box || null) !== st.box) { if (st.box) m.box = st.box; else delete m.box; changed = true; }
   });
   if (changed) saveBankMeta();
+  if (hit) boxGroei();
   skyStart();
 }
 document.addEventListener('keydown', e => {
@@ -3201,6 +3222,8 @@ function skyTick(now) {
   const WW = sky.WW, WH = sky.WH, dt = Math.min(.05, (now - sky.last) / 1000), t = now / 1000, still = skyStill(), G = sky.gather; sky.last = now;
   const BX = new Map(bankBoxes().map(b => [b.id, boxPx(b)]));
   const BR = new Map(bankBoxes().map(b => [b.id, b]));
+  const F = { x0: 0, y0: 0, x1: WW, y1: WH }, FM = sky.D * .8;
+  for (const b of BX.values()) { F.x0 = Math.min(F.x0, b.x - FM); F.y0 = Math.min(F.y0, b.y - FM); F.x1 = Math.max(F.x1, b.x + b.w + FM); F.y1 = Math.max(F.y1, b.y + b.h + FM); }
   if (sky.vt) { const v = sky.v, q = Math.min(1, dt * 6); v.x += (sky.vt.x - v.x) * q; v.y += (sky.vt.y - v.y) * q; v.k += (sky.vt.k - v.k) * q; if (Math.abs(sky.vt.k - v.k) < .002 && Math.abs(sky.vt.x - v.x) < .5) { sky.v = sky.vt; sky.vt = null; } }
   skyApply();
   let busy = !!sky.vt;
@@ -3217,7 +3240,7 @@ function skyTick(now) {
         // losgelaten of gestoten: vliegt door en remt af, kaatst tegen de rand van zijn box (of van het vlak)
         s.x += s.vx * dt; s.y += s.vy * dt;
         const fr = Math.exp(-dt * 2.4); s.vx *= fr; s.vy *= fr;
-        const L = B ? B.x + 8 : 0, T = B ? B.y + 18 : 0, R = Math.max(L, B ? B.x + B.w - s.w - 8 : WW - s.w), D = Math.max(T, B ? B.y + B.h - s.h - 8 : WH - s.h), q = Math.min(1, dt * 12);
+        const L = B ? B.x + 8 : F.x0, T = B ? B.y + 18 : F.y0, R = Math.max(L, B ? B.x + B.w - s.w - 8 : F.x1 - s.w), D = Math.max(T, B ? B.y + B.h - s.h - 8 : F.y1 - s.h), q = Math.min(1, dt * 12);
         let binnen = true;
         if (s.x < L) { s.x += (L - s.x) * q; s.vx = Math.abs(s.vx) * .7; binnen = false; } else if (s.x > R) { s.x += (R - s.x) * q; s.vx = -Math.abs(s.vx) * .7; binnen = false; }
         if (s.y < T) { s.y += (T - s.y) * q; s.vy = Math.abs(s.vy) * .7; binnen = false; } else if (s.y > D) { s.y += (D - s.y) * q; s.vy = -Math.abs(s.vy) * .7; binnen = false; }
@@ -3234,10 +3257,9 @@ function skyTick(now) {
         }
       } else if (!s.hover && !still) {
         s.a += (Math.sin(t * s.f1 * 6 + s.p1) * .6 + Math.sin(t * s.f2 * 5 + s.p2) * .4) * dt * .8;
-        const m = 20;
-        if (s.x < m - s.w * .2 || s.x > WW - s.w * .8 - m || s.y < m - s.h * .2 || s.y > WH - s.h * .8 - m) {
-          let d = Math.atan2(WH / 2 - s.h / 2 - s.y, WW / 2 - s.w / 2 - s.x) - s.a; d = Math.atan2(Math.sin(d), Math.cos(d)); s.a += d * Math.min(1, dt * 1.6);
-        }
+        const c = Math.cos(s.a), n = Math.sin(s.a), q = Math.min(1, dt * 3);
+        if (s.x < F.x0) { s.a = Math.atan2(n, Math.abs(c) + .2); s.x += (F.x0 - s.x) * q; } else if (s.x + s.w > F.x1) { s.a = Math.atan2(n, -Math.abs(c) - .2); s.x += (F.x1 - s.w - s.x) * q; }
+        if (s.y < F.y0) { s.a = Math.atan2(Math.abs(n) + .2, Math.cos(s.a)); s.y += (F.y0 - s.y) * q; } else if (s.y + s.h > F.y1) { s.a = Math.atan2(-Math.abs(n) - .2, Math.cos(s.a)); s.y += (F.y1 - s.h - s.y) * q; }
         s.x += Math.cos(s.a) * s.v * dt; s.y += Math.sin(s.a) * s.v * dt;
       }
       if (!still) {
@@ -3247,7 +3269,8 @@ function skyTick(now) {
           const hx = s.w / 2, hy = s.h / 2, cx = s.x + hx, cy = s.y + hy;
           if (cx > b.x - hx && cx < b.x + b.w + hx && cy > b.y - hy && cy < b.y + b.h + hy) {
             const pl = cx - (b.x - hx), pr = b.x + b.w + hx - cx, pt = cy - (b.y - hy), pb = b.y + b.h + hy - cy, mn = Math.min(pl, pr, pt, pb), st = Math.min(mn, dt * (160 + Math.hypot(s.vx || 0, s.vy || 0) * 1.5));
-            if (mn === pl) { s.x -= st; s.a = Math.PI; if (s.vx) s.vx = -Math.abs(s.vx) * .7; } else if (mn === pr) { s.x += st; s.a = 0; if (s.vx) s.vx = Math.abs(s.vx) * .7; } else if (mn === pt) { s.y -= st; s.a = -Math.PI / 2; if (s.vy) s.vy = -Math.abs(s.vy) * .7; } else { s.y += st; s.a = Math.PI / 2; if (s.vy) s.vy = Math.abs(s.vy) * .7; }
+            const sx = Math.cos(s.a) >= 0 ? 1 : -1, sy = Math.sin(s.a) >= 0 ? 1 : -1;
+            if (mn === pl) { s.x -= st; s.a = Math.atan2(sy, -.35); if (s.vx) s.vx = -Math.abs(s.vx) * .7; } else if (mn === pr) { s.x += st; s.a = Math.atan2(sy, .35); if (s.vx) s.vx = Math.abs(s.vx) * .7; } else if (mn === pt) { s.y -= st; s.a = Math.atan2(-.35, sx); if (s.vy) s.vy = -Math.abs(s.vy) * .7; } else { s.y += st; s.a = Math.atan2(.35, sx); if (s.vy) s.vy = Math.abs(s.vy) * .7; }
             busy = true;
           }
         }
@@ -3324,6 +3347,7 @@ function boxMake(r) {
           if (sp > cap) { vx *= cap / sp; vy *= cap / sp; } if (sp > 40) { st.vx = vx; st.vy = vy; }
         }
         if (!st.vx && !st.vy) st.vx = .001; // dan toch één keer de randen nakijken
+        if (nb) boxGroei();
         skyStart();
       };
     } else if (bxEl && e.target.closest('.bb-box-rs, .bb-box-head')) {
@@ -3422,8 +3446,10 @@ function renderBankPanel() {
     const st = sky.st.get(b.dataset.bb); if (!st) return;
     const v = sky.v, w = st.w * v.k, h = st.h * v.k, sc = w / 1000;
     Object.assign(peek.style, { left: v.x + st.x * v.k + 'px', top: v.y + st.y * v.k + 'px', width: w + 'px', height: h + 'px' });
-    const lines = (m.tekening || []).map(t => `<polyline points="${t.p.join(' ')}" fill="none" stroke="${esc(t.c)}" stroke-width="${Math.max(t.w, 1.6 / sc)}" stroke-linecap="round" stroke-linejoin="round"/>`).join('');
-    const notes = (m.briefjes || []).map(n => `<div class="bb-pnote" style="left:${(n.x * sc).toFixed(1)}px;top:${(n.y * sc).toFixed(1)}px">${esc(n.t)}</div>`).join('');
+    // binnen het beeld blijft alles op zijn plek; wat ernaast staat komt dichterbij (in het kleine beeldje stond het anders veel te ver weg)
+    const H = 1000 / (m.ar || st.ar || 1), K = .3, kx = x => x < 0 ? x * K : x > 1000 ? 1000 + (x - 1000) * K : x, ky = y => y < 0 ? y * K : y > H ? H + (y - H) * K : y;
+    const lines = (m.tekening || []).map(t => `<polyline points="${t.p.map((v, i) => (i % 2 ? ky(v) : kx(v)).toFixed(1)).join(' ')}" fill="none" stroke="${esc(t.c)}" stroke-width="${Math.max(t.w, 1.6 / sc)}" stroke-linecap="round" stroke-linejoin="round"/>`).join('');
+    const notes = (m.briefjes || []).map(n => `<div class="bb-pnote" style="left:${(kx(n.x) * sc).toFixed(1)}px;top:${(ky(n.y) * sc).toFixed(1)}px${n.x < 0 ? ';translate:-100% 0' : ''}">${esc(n.t)}</div>`).join('');
     peek.innerHTML = `<svg viewBox="0 0 1000 ${(1000 / (m.ar || st.ar || 1)).toFixed(1)}" preserveAspectRatio="none">${lines}</svg>${notes}`;
     peek.dataset.for = b.dataset.bb; peek.hidden = false;
   });
