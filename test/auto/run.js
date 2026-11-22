@@ -73,6 +73,34 @@ const deel = async (naam, fn) => { console.log('\n' + naam); try { await fn(); }
     ok('geen fouten in de pagina', !errs.length, errs.join(' | ')); await p.close();
   });
 
+  await deel('Beeldbank: gooien, botsen, box-rand en plaatsen', async () => {
+    const p = await b.newPage({ viewport: { width: 1440, height: 860 } }), errs = []; p.on('pageerror', e => errs.push(e.message));
+    await p.goto(`${URL0}visualisator.html`); await p.waitForFunction(() => typeof items !== 'undefined' && items.length >= 10, null, { timeout: 20000 }); await p.waitForTimeout(1500);
+    await p.click('#tabs [data-view="beeldbank"]'); await p.waitForTimeout(4000);
+    ok('beelden overlappen elkaar niet', await p.evaluate(() => { const L = [...sky.st.values()]; let n = 0; for (const a of L) for (const c of L) if (a !== c && (a.box || null) === (c.box || null) && a.x < c.x + c.w && c.x < a.x + a.w && a.y < c.y + c.h && c.y < a.y + a.h) n++; return n === 0; }));
+    ok('boxnaam ligt boven de beelden', await p.$eval('.bb-box-head', e => getComputedStyle(e).zIndex === '4'));
+    // een vrij beeld met de muis naar net binnen de rand van de box gooien
+    const doel = await p.evaluate(() => {
+      const g = document.getElementById('bb-grid'), R = g.getBoundingClientRect(), B = boxPx(bankBoxes()[0]), el = sky.els.find(e => !sky.st.get(e.dataset.bb).box), s = sky.st.get(el.dataset.bb);
+      sky.v = { x: R.width / 2 - (B.x + B.w / 2), y: R.height / 2 - (B.y + B.h / 2), k: Math.min(1, R.width * .5 / (B.w + 400), R.height * .8 / B.h) }; skyApply();
+      s.x = B.x - s.w - 120; s.y = B.y + B.h / 2 - s.h / 2; s.vx = s.vy = 0; s.hover = false; window.__gooi = el.dataset.bb;
+      const k = sky.v.k, scr = (wx, wy) => [R.left + sky.v.x + wx * k, R.top + sky.v.y + wy * k];
+      return { van: scr(s.x + s.w / 2, s.y + s.h / 2), naar: scr(B.x + 12, B.y + B.h / 2) };
+    });
+    await p.waitForTimeout(100);
+    await p.mouse.move(...doel.van); await p.mouse.down(); await p.mouse.move(doel.naar[0], doel.naar[1], { steps: 6 }); await p.mouse.up();
+    ok('gegooid beeld vliegt nog door', await p.evaluate(() => Math.hypot(sky.st.get(__gooi).vx || 0, sky.st.get(__gooi).vy || 0) > 40));
+    await p.waitForTimeout(2500);
+    ok('net binnen de rand losgelaten: blijft in de box', await p.evaluate(() => { const s = sky.st.get(__gooi), B = boxPx(bankBoxes()[0]); return s.box === bankBoxes()[0].id && s.x >= B.x - 1 && s.x + s.w <= B.x + B.w + 1; }));
+    // meer beelden uit het archief: eerst vragen waar ze moeten komen
+    await p.evaluate(() => document.getElementById('bb-pick').click()); await p.click('[role=menuitem]:has-text("Uit je archief")'); await p.waitForTimeout(300);
+    await p.click('.bb-dumppick .ib:not(.al) >> nth=0'); await p.click('.bb-dumppick .ib:not(.al) >> nth=2'); await p.click('.bb-dumppick [data-dp="go"]');
+    await p.waitForSelector('#bb-plaats', { timeout: 10000 }).catch(() => {});
+    ok('"Hier plaatsen?" volgt de muis', await p.evaluate(() => !!document.getElementById('bb-plaats') && sky.wacht && sky.wacht.size === 2));
+    await p.mouse.move(300, 700); await p.mouse.click(300, 700); await p.waitForTimeout(400);
+    ok('na de klik staan ze er', await p.evaluate(() => !sky.wacht && !document.getElementById('bb-plaats') && !sky.els.some(e => e.style.visibility === 'hidden')));
+    ok('geen fouten in de pagina', !errs.length, errs.join(' | ')); await p.close();
+  });
   await deel('Visualisator: verversknop', async () => {
     const p = await b.newPage({ viewport: { width: 1440, height: 860 } }), errs = []; p.on('pageerror', e => errs.push(e.message));
     await p.goto(`${URL0}visualisator.html`); await p.waitForFunction(() => typeof items !== 'undefined' && items.length >= 10, null, { timeout: 20000 }); await p.waitForTimeout(1500);

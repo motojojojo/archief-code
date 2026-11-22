@@ -495,9 +495,11 @@ body[data-view="ideeen"] #side, body[data-view="beeldbank"] #side, body[data-vie
 #bb-grid .bb img { border-radius: 8px; }
 #bb-grid .bb.dragging { opacity: 1 !important; z-index: 5; cursor: grabbing; }
 #bb-boxes { position: absolute; left: 0; top: 0; }
+#bb-plaats { position: absolute; z-index: 8; pointer-events: none; padding: 6px 10px; border-radius: 8px; background: var(--accent); color: var(--bg); font: 12px var(--sans); white-space: nowrap; box-shadow: 0 6px 20px rgba(0,0,0,.5); translate: 14px 14px; }
+#bb-grid.plaatsen, #bb-grid.plaatsen * { cursor: copy !important; }
 .bb-box { position: absolute; border: 1.5px dashed var(--muted); border-radius: 16px; background: rgba(255,255,255,.025); pointer-events: none; }
 .bb-box.drawing { border-color: var(--accent); background: rgba(255,255,255,.06); }
-.bb-box-head { position: absolute; left: .7em; top: 0; translate: 0 -50%; display: flex; gap: .55em; align-items: center; pointer-events: auto; cursor: move; background: var(--bg); padding: .3em .8em; border-radius: 999px; border: max(1.5px, .06em) solid var(--muted); font: 600 var(--bf, 24px)/1.1 var(--sans); color: var(--ink); white-space: nowrap; }
+.bb-box-head { position: absolute; z-index: 4; left: .7em; top: 0; translate: 0 -50%; display: flex; gap: .55em; align-items: center; pointer-events: auto; cursor: move; background: var(--bg); padding: .3em .8em; border-radius: 999px; border: max(1.5px, .06em) solid var(--muted); font: 600 var(--bf, 24px)/1.1 var(--sans); color: var(--ink); white-space: nowrap; }
 .bb-box-naam[contenteditable="true"] { min-width: 3em; outline: none; cursor: text; user-select: text; -webkit-user-select: text; border-bottom: 2px solid var(--accent); }
 .bb-box-x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 1.05em; line-height: 1; padding: 0; }
 .bb-box-rs { position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px; border-radius: 50%; background: var(--panel); border: 1.5px solid var(--muted); pointer-events: auto; cursor: nwse-resize; }
@@ -2925,6 +2927,7 @@ async function dumpToBank(list) {
       ibSel.delete('dump:' + e.path);
     }
     await saveBankMeta(true);
+    if (bankSel.size > 1) sky.wacht = new Set(bankSel);
     lastSig = ''; await loadFromHandle(false);
     toast(`${list.length} foto${list.length === 1 ? '' : "'s"} naar de beeldbank verplaatst.`);
   } catch (err) { console.error(err); alert('Naar de beeldbank lukte niet: ' + err.message); }
@@ -3030,6 +3033,7 @@ async function bankAdd(files, bron) {
   }
   await saveBankMeta(true);
   bankSel.clear(); added.forEach(p => bankSel.add(p));
+  if (added.length > 1) sky.wacht = new Set(added);
   lastSig = ''; await loadFromHandle(false);
   toast(`${files.length} beeld${files.length === 1 ? '' : 'en'} in de beeldbank. Geef ze rechts een bron, notitie en tags.`);
 }
@@ -3100,8 +3104,10 @@ function skySetup(els) {
       sky.st.set(el.dataset.bb, st);
     }
     st.box = inBox; st.hover = false; st.drag = false; skySize(el, st);
+    st.wacht = !!(sky.wacht && sky.wacht.has(el.dataset.bb)); el.style.visibility = st.wacht ? 'hidden' : '';
   }
   skyBoxes();
+  if (sky.wacht && sky.wacht.size) plaatsStart(); else plaatsStop();
   if (!sky.placed && box.clientWidth) { sky.placed = true; sky.v = { x: (W - WW) / 2, y: (H - WH) / 2, k: 1 }; }
   skyApply();
   if (bankTag) skyGather(bankTag, true); else skyStart();
@@ -3130,6 +3136,63 @@ function skyGather(tag, keep) {
   if (!keep && W && (gw * v.k > W * .86 || gh * v.k > H * .8)) skyZoom(Math.min(W * .86 / gw, H * .8 / gh), W / 2, H / 2, true);
   skyStart();
 }
+function skyBots(dt) {
+  const list = [], cs = sky.D * 1.8, cel = new Map();
+  for (const el of sky.els) { const s = sky.st.get(el.dataset.bb); if (s && !s.wacht && s.tx == null) list.push(s); }
+  for (const s of list) { const k = Math.floor(s.x / cs) + ',' + Math.floor(s.y / cs); (cel.get(k) || cel.set(k, []).get(k)).push(s); }
+  const gap = 6, mag = s => !s.drag && !s.hover; let busy = false;
+  for (const a of list) {
+    const gx = Math.floor(a.x / cs), gy = Math.floor(a.y / cs);
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const b of cel.get((gx + i) + ',' + (gy + j)) || []) {
+      if (b === a || (a.box || null) !== (b.box || null) || !(a.x < b.x || (a.x === b.x && a.y < b.y))) continue;
+      const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) + gap, oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) + gap;
+      if (ox <= 0 || oy <= 0) continue;
+      const fa = mag(a), fb = mag(b); if (!fa && !fb) continue;
+      const wa = fa && fb ? .5 : fa ? 1 : 0, wb = 1 - wa;
+      if (ox < oy) {
+        const sg = a.x + a.w / 2 < b.x + b.w / 2 ? -1 : 1, p = Math.min(ox, dt * 220 + Math.abs((a.vx || 0) - (b.vx || 0)) * dt);
+        a.x += sg * p * wa; b.x -= sg * p * wb;
+        // stoten: de snelheid langs die richting wisselt (met wat verlies), en de zweefrichting draait om
+        if (((b.vx || 0) - (a.vx || 0)) * -sg < 0 || a.vx || b.vx) { const av = a.vx || 0, bv = b.vx || 0; if (fa) a.vx = fb ? bv * .8 : sg * Math.abs(av) * .7; if (fb) b.vx = fa ? av * .8 : -sg * Math.abs(bv) * .7; }
+        if (fa) a.a = Math.atan2(Math.sin(a.a), sg * Math.abs(Math.cos(a.a))); if (fb) b.a = Math.atan2(Math.sin(b.a), -sg * Math.abs(Math.cos(b.a)));
+      } else {
+        const sg = a.y + a.h / 2 < b.y + b.h / 2 ? -1 : 1, p = Math.min(oy, dt * 220 + Math.abs((a.vy || 0) - (b.vy || 0)) * dt);
+        a.y += sg * p * wa; b.y -= sg * p * wb;
+        if (a.vy || b.vy) { const av = a.vy || 0, bv = b.vy || 0; if (fa) a.vy = fb ? bv * .8 : sg * Math.abs(av) * .7; if (fb) b.vy = fa ? av * .8 : -sg * Math.abs(bv) * .7; }
+        if (fa) a.a = Math.atan2(sg * Math.abs(Math.sin(a.a)), Math.cos(a.a)); if (fb) b.a = Math.atan2(-sg * Math.abs(Math.sin(b.a)), Math.cos(b.a));
+      }
+      busy = true;
+    }
+  }
+  return busy;
+}
+// nieuwe beelden (meer dan één tegelijk): de muis vraagt waar ze moeten komen
+function plaatsStart() {
+  const g = $('#bb-grid'); let lb = $('#bb-plaats');
+  if (!lb) { lb = document.createElement('div'); lb.id = 'bb-plaats'; g.appendChild(lb); lb.style.left = g.clientWidth / 2 + 'px'; lb.style.top = g.clientHeight / 2 + 'px'; }
+  lb.textContent = `Hier plaatsen? · ${sky.wacht.size} beelden · klik waar ze moeten komen (Esc: midden van je scherm)`;
+  g.classList.add('plaatsen');
+}
+function plaatsStop() { $('#bb-plaats')?.remove(); $('#bb-grid').classList.remove('plaatsen'); }
+function plaatsHier(wx, wy) {
+  const paths = [...(sky.wacht || [])]; sky.wacht = null; plaatsStop();
+  const hit = boxAt(wx, wy), still = skyStill(); let changed = false;
+  paths.forEach((p, i) => {
+    const st = sky.st.get(p), el = sky.els.find(x => x.dataset.bb === p); if (!st || !el) return;
+    // allemaal vanaf de klik naar buiten: botsen en randen verdelen ze vanzelf
+    const ang = i / paths.length * 6.283 + Math.random() * .4, sp = 240 + Math.random() * 220;
+    st.wacht = false; st.x = wx - st.w / 2 + (still ? (i % 4) * 30 : 0); st.y = wy - st.h / 2 + (still ? Math.floor(i / 4) * 30 : 0);
+    st.vx = still ? 0 : Math.cos(ang) * sp; st.vy = still ? 0 : Math.sin(ang) * sp; st.box = hit ? hit.id : null; el.style.visibility = '';
+    const e = bankEntries.find(x => x.path === p), m = e && bankOf(e);
+    if (m && (m.box || null) !== st.box) { if (st.box) m.box = st.box; else delete m.box; changed = true; }
+  });
+  if (changed) saveBankMeta();
+  skyStart();
+}
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || !sky.wacht || !sky.wacht.size || view !== 'beeldbank') return;
+  const g = $('#bb-grid'), v = sky.v; e.stopPropagation(); plaatsHier((g.clientWidth / 2 - v.x) / v.k, (g.clientHeight / 2 - v.y) / v.k);
+}, true);
 function skyStart() { if (!sky.raf && view === 'beeldbank') { sky.last = performance.now(); sky.raf = requestAnimationFrame(skyTick); } }
 function skyTick(now) {
   sky.raf = 0;
@@ -3141,15 +3204,26 @@ function skyTick(now) {
   if (sky.vt) { const v = sky.v, q = Math.min(1, dt * 6); v.x += (sky.vt.x - v.x) * q; v.y += (sky.vt.y - v.y) * q; v.k += (sky.vt.k - v.k) * q; if (Math.abs(sky.vt.k - v.k) < .002 && Math.abs(sky.vt.x - v.x) < .5) { sky.v = sky.vt; sky.vt = null; } }
   skyApply();
   let busy = !!sky.vt;
+  if (!still && skyBots(dt)) busy = true;
   for (const el of sky.els) {
-    const s = sky.st.get(el.dataset.bb); if (!s) continue;
+    const s = sky.st.get(el.dataset.bb); if (!s || s.wacht) continue;
     let r = 0, o = 1;
     if (s.drag) { /* de muis bepaalt de plek */ }
     else if (s.tx != null) {
       if (still) { s.x = s.tx; s.y = s.ty; } else { const q = Math.min(1, dt * 4.5); s.x += (s.tx - s.x) * q; s.y += (s.ty - s.y) * q; if (Math.abs(s.tx - s.x) > .5 || Math.abs(s.ty - s.y) > .5) busy = true; }
     } else {
       const B = s.box ? BX.get(s.box) : null;
-      if (B) {
+      if ((s.vx || s.vy) && !still) {
+        // losgelaten of gestoten: vliegt door en remt af, kaatst tegen de rand van zijn box (of van het vlak)
+        s.x += s.vx * dt; s.y += s.vy * dt;
+        const fr = Math.exp(-dt * 2.4); s.vx *= fr; s.vy *= fr;
+        const L = B ? B.x + 8 : 0, T = B ? B.y + 18 : 0, R = Math.max(L, B ? B.x + B.w - s.w - 8 : WW - s.w), D = Math.max(T, B ? B.y + B.h - s.h - 8 : WH - s.h), q = Math.min(1, dt * 12);
+        let binnen = true;
+        if (s.x < L) { s.x += (L - s.x) * q; s.vx = Math.abs(s.vx) * .7; binnen = false; } else if (s.x > R) { s.x += (R - s.x) * q; s.vx = -Math.abs(s.vx) * .7; binnen = false; }
+        if (s.y < T) { s.y += (T - s.y) * q; s.vy = Math.abs(s.vy) * .7; binnen = false; } else if (s.y > D) { s.y += (D - s.y) * q; s.vy = -Math.abs(s.vy) * .7; binnen = false; }
+        if (binnen && Math.hypot(s.vx, s.vy) < s.v * 1.2) { if (Math.hypot(s.vx, s.vy) > 1) s.a = Math.atan2(s.vy, s.vx); s.vx = s.vy = 0; }
+        busy = true;
+      } else if (B) {
         // in een box: erbinnen blijven; staat hij erbuiten (na een tag), dan rent hij terug
         const x0 = B.x + 8, y0 = B.y + 18, x1 = Math.max(x0, B.x + B.w - s.w - 8), y1 = Math.max(y0, B.y + B.h - s.h - 8), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, mx = s.x + s.w / 2, my = s.y + s.h / 2;
         if (mx < B.x || mx > B.x + B.w || my < B.y || my > B.y + B.h) { const q = Math.min(1, dt * (still ? 99 : 3)); s.x += (cx - s.x) * q; s.y += (cy - s.y) * q; busy = true; }
@@ -3172,8 +3246,8 @@ function skyTick(now) {
           if (id === s.box || (s.box && BR.get(s.box) && boxIn(BR.get(s.box), BR.get(id)))) continue;
           const hx = s.w / 2, hy = s.h / 2, cx = s.x + hx, cy = s.y + hy;
           if (cx > b.x - hx && cx < b.x + b.w + hx && cy > b.y - hy && cy < b.y + b.h + hy) {
-            const pl = cx - (b.x - hx), pr = b.x + b.w + hx - cx, pt = cy - (b.y - hy), pb = b.y + b.h + hy - cy, mn = Math.min(pl, pr, pt, pb), st = Math.min(mn, dt * 160);
-            if (mn === pl) { s.x -= st; s.a = Math.PI; } else if (mn === pr) { s.x += st; s.a = 0; } else if (mn === pt) { s.y -= st; s.a = -Math.PI / 2; } else { s.y += st; s.a = Math.PI / 2; }
+            const pl = cx - (b.x - hx), pr = b.x + b.w + hx - cx, pt = cy - (b.y - hy), pb = b.y + b.h + hy - cy, mn = Math.min(pl, pr, pt, pb), st = Math.min(mn, dt * (160 + Math.hypot(s.vx || 0, s.vy || 0) * 1.5));
+            if (mn === pl) { s.x -= st; s.a = Math.PI; if (s.vx) s.vx = -Math.abs(s.vx) * .7; } else if (mn === pr) { s.x += st; s.a = 0; if (s.vx) s.vx = Math.abs(s.vx) * .7; } else if (mn === pt) { s.y -= st; s.a = -Math.PI / 2; if (s.vy) s.vy = -Math.abs(s.vy) * .7; } else { s.y += st; s.a = Math.PI / 2; if (s.vy) s.vy = Math.abs(s.vy) * .7; }
             busy = true;
           }
         }
@@ -3213,8 +3287,10 @@ function boxMake(r) {
   grid.addEventListener('contextmenu', e => e.preventDefault());
   // na het slepen van een beeld: niet ook nog openen
   grid.addEventListener('click', e => { if (sky.noClick) { sky.noClick = false; e.stopPropagation(); e.preventDefault(); } }, true);
+  grid.addEventListener('pointermove', e => { const lb = $('#bb-plaats'); if (!lb) return; const r = grid.getBoundingClientRect(); lb.style.left = e.clientX - r.left + 'px'; lb.style.top = e.clientY - r.top + 'px'; });
   grid.addEventListener('pointerdown', e => {
     sky.noClick = false;
+    if (sky.wacht && sky.wacht.size) { e.preventDefault(); e.stopPropagation(); sky.noClick = true; if (e.button === 0) plaatsHier(...toWorld(e.clientX, e.clientY)); return; }
     if (e.target.closest('.toolbar, .bb-box-x, [contenteditable="true"]')) return;
     const [wx, wy] = toWorld(e.clientX, e.clientY), tile = e.target.closest('.bb'), bxEl = e.target.closest('.bb-box');
     let mv = null, end = null;
@@ -3225,11 +3301,12 @@ function boxMake(r) {
       end = () => { d.remove(); if (r && r.w > 80 && r.h > 80) boxMake(r); };
     } else if (e.button !== 0) return;
     else if (tile) {
-      const st = sky.st.get(tile.dataset.bb); if (!st) return; let moved = false; const ox = wx - st.x, oy = wy - st.y;
+      const st = sky.st.get(tile.dataset.bb); if (!st) return; let moved = false; const ox = wx - st.x, oy = wy - st.y, hist = [];
       mv = ev => {
         if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 5) return;
-        if (!moved) { moved = true; st.drag = true; st.tx = null; tile.classList.add('dragging'); try { grid.setPointerCapture(e.pointerId); } catch (er) {} }
+        if (!moved) { moved = true; st.drag = true; st.tx = null; st.vx = st.vy = 0; tile.classList.add('dragging'); try { grid.setPointerCapture(e.pointerId); } catch (er) {} }
         const [x, y] = toWorld(ev.clientX, ev.clientY); st.x = x - ox; st.y = y - oy;
+        hist.push([performance.now(), st.x, st.y]); if (hist.length > 10) hist.shift();
         tile.style.transform = `translate3d(${st.x.toFixed(1)}px,${st.y.toFixed(1)}px,0)`;
       };
       end = () => {
@@ -3239,7 +3316,15 @@ function boxMake(r) {
         const hit = boxAt(st.x + st.w / 2, st.y + st.h / 2);
         const en = bankEntries.find(x => x.path === tile.dataset.bb), m = en && bankOf(en), nb = hit ? hit.id : null;
         if (m && (m.box || null) !== nb) { if (nb) m.box = nb; else delete m.box; saveBankMeta(); }
-        st.box = nb; skyStart();
+        st.box = nb;
+        // de vaart van de laatste beweging gaat mee: hij vliegt nog wat door (en blijft binnen zijn box)
+        const now = performance.now(), h0 = hist.find(h => now - h[0] < 100), hl = hist[hist.length - 1];
+        if (h0 && hl && hl !== h0 && now - hl[0] < 60) {
+          const d = Math.max(16, hl[0] - h0[0]) / 1000; let vx = (hl[1] - h0[1]) / d, vy = (hl[2] - h0[2]) / d; const sp = Math.hypot(vx, vy), cap = 2200;
+          if (sp > cap) { vx *= cap / sp; vy *= cap / sp; } if (sp > 40) { st.vx = vx; st.vy = vy; }
+        }
+        if (!st.vx && !st.vy) st.vx = .001; // dan toch één keer de randen nakijken
+        skyStart();
       };
     } else if (bxEl && e.target.closest('.bb-box-rs, .bb-box-head')) {
       const b = bankBoxes().find(x => x.id === bxEl.dataset.box); if (!b) return;
@@ -3602,6 +3687,7 @@ function renderBankPanel() {
         M.beelden[name] = { datum: it.datum || today, bron: it.title, notitie: '', tags: [], uit: im.entry.path }; bankSel.add(BANK_DIR + '/' + name);
       }
       await saveBankMeta(true);
+      if (bankSel.size > 1) sky.wacht = new Set(bankSel);
       lastSig = ''; await loadFromHandle(false);
       toast(`${list.length} beeld${list.length === 1 ? '' : 'en'} uit je archief in de beeldbank. Het origineel blijft bij het item.`);
     } catch (err) { console.error(err); alert('Naar de beeldbank zetten lukte niet: ' + err.message); }
