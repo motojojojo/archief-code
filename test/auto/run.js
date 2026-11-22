@@ -73,6 +73,16 @@ const deel = async (naam, fn) => { console.log('\n' + naam); try { await fn(); }
     ok('geen fouten in de pagina', !errs.length, errs.join(' | ')); await p.close();
   });
 
+  await deel('Visualisator: verversknop', async () => {
+    const p = await b.newPage({ viewport: { width: 1440, height: 860 } }), errs = []; p.on('pageerror', e => errs.push(e.message));
+    await p.goto(`${URL0}visualisator.html`); await p.waitForFunction(() => typeof items !== 'undefined' && items.length >= 10, null, { timeout: 20000 }); await p.waitForTimeout(1500);
+    // een nieuwe notitie verschijnt in de map (alsof hij van de telefoon komt)
+    await p.evaluate(async () => { const d = await MOCKFS.root.getDirectoryHandle('Onderzoek'); const w = await (await d.getFileHandle('Van de telefoon.md', { create: true })).createWritable(); await w.write(['---', 'datum: 2026-11-01', 'project: Proef B', 'type:', 'tags: []', '---', '', 'Nieuw.', ''].join(String.fromCharCode(10))); await w.close(); });
+    await p.click('#btn-ververs'); await p.waitForFunction(() => items.length === 11, null, { timeout: 10000 }).catch(() => {});
+    ok('↻ haalt het nieuwe item op', await p.evaluate(() => items.length) === 11);
+    ok('geen fouten in de pagina', !errs.length, errs.join(' | ')); await p.close();
+  });
+
   // ---------- telefoon-plugin ----------
   const telefoon = async (dev, q = '') => { const ctx = await b.newContext({ ...devices[dev] }), p = await ctx.newPage(), errs = []; p.on('pageerror', e => errs.push(e.message)); await p.goto(`${URL0}plugin.html${q}`); await p.waitForFunction(() => window.VIEW && document.querySelector('.am-tabs'), null, { timeout: 20000 }); await p.waitForTimeout(600); return { ctx, p, errs }; };
   const lees = (p, t) => p.evaluate(t => PLUGIN.app.vault.read(PLUGIN.app.vault.getMarkdownFiles().find(f => f.basename === t)), t);

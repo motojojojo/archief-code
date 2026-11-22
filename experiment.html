@@ -1047,6 +1047,9 @@ svg.hovering #stroom-g .node:not(.hl) { opacity: .18; }
 #dz-sound.off { text-decoration: line-through; opacity: .6; }
 #dz-sound.laden { color: var(--ink); animation: dz-laden 1s ease-in-out infinite alternate; }
 @keyframes dz-laden { to { opacity: .35; } }
+#btn-ververs { font-size: 14px; line-height: 1; }
+#btn-ververs.bezig { animation: ververs-draai .8s linear infinite; pointer-events: none; }
+@keyframes ververs-draai { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -1065,6 +1068,7 @@ svg.hovering #stroom-g .node:not(.hl) { opacity: .18; }
   </div>
   <div class="grow"></div>
   <div class="status" id="status"></div>
+  <button class="btn live-only" id="btn-ververs" title="Opnieuw inlezen: haalt nieuwe en veranderde items op (bijv. van je telefoon)">↻</button>
   <button class="btn live-only" id="btn-open">Map kiezen</button>
   <button class="btn" id="btn-show" title="Presenteer wat je nu ziet, op datum (lichtbak)">▶ Presenteren</button>
   <button class="btn live-only" id="btn-share" title="Exporteer de huidige selectie als één HTML-bestand">Delen</button>
@@ -1623,6 +1627,19 @@ async function resume() {
     if (ok) await loadFromHandle(false);
   } catch (e) { openFolder(); }
 }
+// ↻: de map opnieuw inlezen, zonder de pagina te herladen
+async function verversNu() {
+  const b = $('#btn-ververs'); if (!dirHandle) return openFolder();
+  if (b.classList.contains('bezig')) return;
+  b.classList.add('bezig');
+  try {
+    if (await dirHandle.queryPermission({ mode: 'read' }) !== 'granted') { await resume(); return; }
+    const n0 = items.length; lastSig = ''; await loadFromHandle(true);
+    const d = items.length - n0; toast(d > 0 ? `Ververst: ${d} nieuw item${d === 1 ? '' : 's'}.` : d < 0 ? `Ververst: ${-d} item${d === -1 ? '' : 's'} minder.` : 'Ververst.');
+  } catch (e) { console.error(e); toast('Verversen lukte niet: ' + e.message); }
+  finally { b.classList.remove('bezig'); }
+}
+$('#btn-ververs').addEventListener('click', verversNu);
 let focusTimer = 0;
 const refresh = () => { clearTimeout(focusTimer); focusTimer = setTimeout(() => { if (mode === 'live' && dirHandle && items.length && !editing) loadFromHandle(true); }, 250); };
 window.addEventListener('focus', refresh);
