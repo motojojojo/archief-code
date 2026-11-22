@@ -5503,6 +5503,8 @@ function renderView(dataChanged) {
   applyFilter();
 }
 function setView(v) {
+  // ander tabblad: het infopaneel van een item dicht (niet tijdens bewerken); anders ligt het over bijv. de inklokknop
+  if (v !== view && !editing && $('#detail').classList.contains('open')) closeDetail();
   view = v;
   for (const b of $$('#tabs button')) b.classList.toggle('on', b.dataset.view === v);
   for (const el of $$('.view')) el.classList.toggle('on', el.id === 'view-' + v);
